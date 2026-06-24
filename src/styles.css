@@ -20,6 +20,7 @@ body {
 
 button,
 input,
+textarea,
 select {
   font: inherit;
 }
@@ -55,6 +56,7 @@ button:disabled {
 }
 
 input,
+textarea,
 select {
   background: #fff;
   border: 1px solid #d8e2e5;
@@ -67,9 +69,17 @@ select {
 }
 
 input:focus,
+textarea:focus,
 select:focus {
   border-color: #78a6c8;
   box-shadow: 0 0 0 3px rgba(120, 166, 200, 0.2);
+}
+
+textarea {
+  line-height: 1.35;
+  max-height: 132px;
+  min-height: 42px;
+  resize: none;
 }
 
 .app-shell {
@@ -199,6 +209,73 @@ p {
   letter-spacing: 0;
 }
 
+.toolbar {
+  justify-content: flex-end;
+}
+
+.toolbar button {
+  min-width: 0;
+}
+
+.file-menu {
+  position: relative;
+}
+
+.file-menu-popover {
+  background: #fff;
+  border: 1px solid #d9e4e7;
+  border-radius: 8px;
+  box-shadow: 0 18px 42px rgba(47, 69, 82, 0.18);
+  display: grid;
+  gap: 4px;
+  min-width: 220px;
+  padding: 6px;
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  z-index: 60;
+}
+
+.file-menu-popover button {
+  border-color: transparent;
+  justify-content: flex-start;
+  width: 100%;
+}
+
+.file-menu-popover button:hover:not(:disabled) {
+  background: #f4f8f7;
+}
+
+.help-menu-popover {
+  min-width: 250px;
+}
+
+.hidden-file-input {
+  display: none;
+}
+
+.root-title-input {
+  background: transparent;
+  border-color: transparent;
+  color: #22313f;
+  font-size: 20px;
+  font-weight: 800;
+  min-height: 40px;
+  padding: 4px 0;
+}
+
+.root-title-input:hover {
+  background: #f7fbfa;
+  border-color: #d8e5e7;
+  padding-inline: 10px;
+}
+
+.root-title-input:focus {
+  background: #fff;
+  border-color: #78a6c8;
+  padding-inline: 10px;
+}
+
 .eyebrow,
 .winner-strip span,
 .section-title {
@@ -290,13 +367,30 @@ p {
   border: 1px solid #ead9b5;
 }
 
+.prompt-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.prompt-chips button {
+  background: #f7fbfa;
+  border-color: #dbe8e6;
+  color: #35515b;
+  font-size: 12px;
+  min-height: 30px;
+  padding: 0 9px;
+}
+
 .chat-box {
   display: grid;
   gap: 8px;
-  grid-template-columns: 1fr 42px;
+  grid-template-columns: minmax(0, 1fr) 42px;
+  align-items: end;
 }
 
 .chat-box button {
+  height: 42px;
   min-width: 42px;
   padding: 0;
 }
@@ -332,6 +426,12 @@ p {
 .modal.compact {
   max-width: 620px;
   width: min(620px, 94vw);
+}
+
+.modal.matrix {
+  max-height: min(620px, 86vh);
+  max-width: 1120px;
+  width: min(1120px, 94vw);
 }
 
 .modal-header {
@@ -584,12 +684,100 @@ p {
   grid-template-columns: 1fr 38px;
 }
 
+.help-panel {
+  display: grid;
+  gap: 14px;
+}
+
+.help-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.help-tabs button {
+  font-size: 12px;
+  min-height: 32px;
+  padding: 0 10px;
+}
+
+.help-tabs button.selected {
+  background: #2f6975;
+  border-color: #2f6975;
+  color: #fff;
+}
+
+.help-content {
+  background: #f8faf9;
+  border: 1px solid #e0e8ea;
+  border-radius: 8px;
+  color: #334651;
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+}
+
+.help-content h3 {
+  font-size: 17px;
+}
+
+.help-content p,
+.help-content li {
+  font-size: 14px;
+}
+
+.help-content ul,
+.help-content ol {
+  margin: 0;
+  padding-left: 20px;
+}
+
 .wide-button {
   width: 100%;
 }
 
 .matrix-wrap {
+  border: 1px solid #e0e8ea;
+  border-radius: 8px;
+  max-height: min(430px, 58vh);
   overflow: auto;
+}
+
+.matrix {
+  border-collapse: collapse;
+  min-width: 680px;
+  width: 100%;
+}
+
+.matrix th,
+.matrix td {
+  border-bottom: 1px solid #e2ebed;
+  padding: 8px 10px;
+  text-align: left;
+}
+
+.matrix th {
+  background: #f7faf9;
+  color: #667987;
+  font-size: 12px;
+  position: sticky;
+  text-transform: uppercase;
+  top: 0;
+  z-index: 1;
+}
+
+.matrix tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.matrix td:first-child {
+  font-weight: 800;
+  min-width: 150px;
+}
+
+.matrix input,
+.matrix select {
+  min-width: 110px;
 }
 
 .result-table-wrap {

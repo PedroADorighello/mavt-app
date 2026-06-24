@@ -1,6 +1,6 @@
 # MAVT Workspace
 
-Aplicativo web interativo para tomada de decisao pelo metodo MAVT, com uma tela unica de trabalho, arvore de criterios, matriz de desempenho, painel de resultados e agente de IA simulado por chat lateral.
+Aplicativo web interativo para tomada de decisao pelo metodo MAVT, com uma tela unica de trabalho, arvore de criterios, matriz de desempenho, painel de resultados e agente de IA por chat lateral.
 
 ## Rodar localmente
 
@@ -14,6 +14,22 @@ Depois acesse:
 ```text
 http://127.0.0.1:5173
 ```
+
+## Ativar IA real no chat
+
+O app inclui um endpoint local `/api/agent` que chama a OpenAI pelo servidor Vite. A chave nao fica no frontend.
+
+1. Crie um arquivo `.env` na raiz do projeto.
+2. Preencha:
+
+```text
+OPENAI_API_KEY=sua_chave_aqui
+MAVT_OPENAI_MODEL=gpt-5.5
+```
+
+3. Reinicie o `npm run dev`.
+
+Sem `OPENAI_API_KEY`, o chat continua funcionando com o agente local por regras.
 
 ## Gerar build de producao
 
@@ -40,7 +56,7 @@ Depois do deploy, a Vercel gera uma URL no formato:
 https://nome-do-projeto.vercel.app
 ```
 
-## Comandos aceitos pelo agente simulado
+## Comandos aceitos pelo agente
 
 Exemplos:
 
@@ -52,4 +68,4 @@ peso do preco para 35%
 defina preco de 80000 a 150000 menor melhor
 ```
 
-O agente atual e uma simulacao local com parser de texto. Para integrar uma IA real, conecte o campo de chat a uma rota backend que chame o modelo desejado e retorne operacoes estruturadas sobre o estado da decisao.
+Com a chave configurada, a IA interpreta pedidos mais livres e retorna operacoes estruturadas. Se a chamada falhar, o app usa automaticamente o parser local como fallback.

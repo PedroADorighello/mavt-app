@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   Background,
@@ -16,6 +16,9 @@ import {
   Bot,
   ChevronLeft,
   ChevronRight,
+  Download,
+  FileJson,
+  HelpCircle,
   Plus,
   Redo2,
   RotateCcw,
@@ -24,6 +27,7 @@ import {
   Table2,
   Trash2,
   Undo2,
+  Upload,
   X,
 } from "lucide-react";
 import {
@@ -93,7 +97,31 @@ type ChatMessage = {
   text: string;
 };
 
-type ActiveModal = "alternatives" | "matrix" | "results" | null;
+type AssistantShortcut = {
+  label: string;
+  prompt: string;
+};
+
+type AssistantOperation =
+  | { type: "setRootName"; rootName?: string }
+  | { type: "replaceAlternatives"; alternatives?: string[] }
+  | { type: "addAlternatives"; alternatives?: string[] }
+  | { type: "removeAlternatives"; alternatives?: string[] }
+  | { type: "replaceCriteria"; criteria?: Array<{ name?: string; weight?: number; subcriteria?: string[] }> }
+  | { type: "addCriteria"; criteria?: Array<{ name?: string; weight?: number; subcriteria?: string[] }> }
+  | { type: "removeCriteria"; criteria?: string[] }
+  | { type: "setCriterionWeight"; criterion?: string; weight?: number }
+  | { type: "addSubcriteria"; criterion?: string; subcriteria?: string[] }
+  | { type: "configureScale"; criterion?: string; min?: number; max?: number; direction?: Direction }
+  | { type: "setPerformance"; criterion?: string; alternative?: string; value?: number | string };
+
+type AgentResponse = {
+  reply: string;
+  operations: AssistantOperation[];
+};
+
+type ActiveModal = "alternatives" | "matrix" | "results" | "help" | null;
+type HelpTopic = "use" | "method" | "steps" | "agent" | "files" | "results";
 
 type CriterionNodeData = {
   criterion?: Criterion;
@@ -106,6 +134,38 @@ type CriterionNodeData = {
 
 const ROOT_ID = "__overall__";
 const colors = ["#78a6c8", "#f2a7a1", "#9bcf9f", "#e9c46a", "#b59bd8", "#7ac7c4"];
+const assistantShortcuts: AssistantShortcut[] = [
+  {
+    label: "Adicionar critério",
+    prompt: "Adicione o critério [nome] com peso [valor]%",
+  },
+  {
+    label: "Adicionar alternativa",
+    prompt: "Adicione a alternativa [nome]",
+  },
+  {
+    label: "Definir problema",
+    prompt:
+      "As alternativas são [A], [B], [C] e o problema central é [objetivo]. Os critérios são [critério 1], [critério 2], [critério 3].",
+  },
+  {
+    label: "Subcritérios",
+    prompt: "Adicione os subcritérios [subcritério 1], [subcritério 2] ao critério [nome do critério]",
+  },
+  {
+    label: "Ajustar peso",
+    prompt: "Peso do critério [nome] para [valor]%",
+  },
+];
+
+const helpTopics: Array<{ id: HelpTopic; label: string }> = [
+  { id: "use", label: "Como usar o software" },
+  { id: "method", label: "O que é o método MAVT" },
+  { id: "steps", label: "Passo a passo MAVT" },
+  { id: "agent", label: "Agente MAVT" },
+  { id: "files", label: "Importar e exportar" },
+  { id: "results", label: "Resultados e sensibilidade" },
+];
 
 const initialModel: DecisionModel = {
   rootName: "Overall",
@@ -122,14 +182,14 @@ const initialModel: DecisionModel = {
       children: [
         {
           id: "crit-preco",
-          name: "Preco",
+          name: "Preço",
           weight: 75,
           scale: { min: 80000, max: 150000, direction: "cost" },
           performances: { "alt-civic": 145000, "alt-corolla": 142000, "alt-hb20": 88000 },
         },
         {
           id: "crit-manutencao",
-          name: "Manutencao",
+          name: "Manutenção",
           weight: 25,
           scale: { min: 2500, max: 9000, direction: "cost" },
           performances: { "alt-civic": 7400, "alt-corolla": 6900, "alt-hb20": 3900 },
@@ -143,7 +203,7 @@ const initialModel: DecisionModel = {
       children: [
         {
           id: "crit-seguranca",
-          name: "Seguranca",
+          name: "Segurança",
           weight: 55,
           scale: { min: 0, max: 10, direction: "benefit" },
           performances: { "alt-civic": 9.2, "alt-corolla": 9, "alt-hb20": 7.4 },
@@ -172,7 +232,9 @@ const isLeaf = (criterion: Criterion) => !criterion.children || criterion.childr
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
 const clamp01 = (value: number) => clamp(value, 0, 1);
 const sumWeights = (items: Criterion[]) => items.reduce((sum, item) => sum + Math.max(0, item.weight), 0) || 1;
-const displayWeight = (value: number) => Math.round(value * 10) / 10;
+const displayWeight = (value: number) => Number(value.toFixed(2));
+const formatWeight = (value: number) =>
+  displayWeight(value).toLocaleString("pt-BR", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
 
 function findCriterion(criteria: Criterion[], id: string): Criterion | undefined {
   for (const criterion of criteria) {
@@ -412,7 +474,7 @@ function CriterionFlowNode({ data }: { data: CriterionNodeData }) {
       <strong>{data.label}</strong>
       {!data.isRoot && (
         <div className="node-meta">
-          <span>{displayWeight(data.criterion?.weight ?? 100)}% local</span>
+          <span>{formatWeight(data.criterion?.weight ?? 100)}% local</span>
           <span>{Math.round(data.globalWeight * 100)}% global</span>
         </div>
       )}
@@ -430,7 +492,7 @@ function Modal({
   onClose,
 }: {
   title: string;
-  size?: "medium" | "large" | "compact";
+  size?: "medium" | "large" | "compact" | "matrix";
   children: React.ReactNode;
   onClose: () => void;
 }) {
@@ -461,14 +523,20 @@ function App() {
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const [chatOpen, setChatOpen] = useState(true);
   const [chatInput, setChatInput] = useState("");
+  const [assistantThinking, setAssistantThinking] = useState(false);
+  const [fileMenuOpen, setFileMenuOpen] = useState(false);
+  const [helpMenuOpen, setHelpMenuOpen] = useState(false);
+  const [helpTopic, setHelpTopic] = useState<HelpTopic>("use");
   const [notice, setNotice] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       role: "assistant",
-      text: "Posso editar a estrutura por voce. Tente: adicione alternativa SUV, adicione criterio seguranca peso 20%, ou remova HB20.",
+      text:
+        "Posso editar a estrutura por você. Entendo pedidos simples e também descrições completas com alternativas, problema central, critérios e subcritérios.",
     },
   ]);
   const [sensitivityLeafId, setSensitivityLeafId] = useState("crit-preco");
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const leaves = useMemo(() => collectLeaves(model.criteria), [model.criteria]);
   const results = useMemo(() => calculateResults(model), [model]);
@@ -522,7 +590,7 @@ function App() {
   const addRootCriterion = () => {
     const criterion: Criterion = {
       id: uid("crit"),
-      name: "Novo criterio",
+      name: "Novo critério",
       weight: 20,
       scale: { min: 0, max: 10, direction: "benefit" },
       performances: {},
@@ -540,14 +608,14 @@ function App() {
 
     const first: Criterion = {
       id: uid("crit"),
-      name: "Criterio 1",
+      name: "Critério 1",
       weight: 50,
       scale: { min: 0, max: 10, direction: "benefit", mode: "quantitative" },
       performances: {},
     };
     const second: Criterion = {
       id: uid("crit"),
-      name: "Criterio 2",
+      name: "Critério 2",
       weight: 50,
       scale: { min: 0, max: 10, direction: "benefit", mode: "quantitative" },
       performances: {},
@@ -566,7 +634,7 @@ function App() {
   const addChildCriterion = (parentId: string) => {
     const child: Criterion = {
       id: uid("crit"),
-      name: "Subcriterio",
+      name: "Subcritério",
       weight: 20,
       scale: { min: 0, max: 10, direction: "benefit" },
       performances: {},
@@ -578,14 +646,14 @@ function App() {
         if (children.length === 0) {
           const first: Criterion = {
             id: uid("crit"),
-            name: "Subcriterio A",
+            name: "Subcritério A",
             weight: 50,
             scale: criterion.scale ?? { min: 0, max: 10, direction: "benefit" },
             performances: { ...(criterion.performances ?? {}) },
           };
           const second: Criterion = {
             id: uid("crit"),
-            name: "Subcriterio B",
+            name: "Subcritério B",
             weight: 50,
             scale: criterion.scale ?? { min: 0, max: 10, direction: "benefit" },
             performances: { ...(criterion.performances ?? {}) },
@@ -673,13 +741,104 @@ function App() {
     }));
   };
 
-  const runAssistantCommand = () => {
+  const exportCompleteJson = () => {
+    downloadText(
+      `mavt-${slugify(model.rootName || "decisao")}.json`,
+      JSON.stringify(
+        {
+          version: 1,
+          exportedAt: new Date().toISOString(),
+          model,
+          results,
+        },
+        null,
+        2,
+      ),
+      "application/json",
+    );
+  };
+
+  const exportResultsCsv = () => {
+    const headers = ["Alternativa", "Total", ...leaves.map((leaf) => leaf.criterion.name)];
+    const rows = results.map((result) => [
+      result.name,
+      formatNumber(result.score),
+      ...leaves.map((leaf) => formatNumber(result.contributions.find((item) => item.id === leaf.criterion.id)?.value ?? 0)),
+    ]);
+    downloadText(`resultados-${slugify(model.rootName || "decisao")}.csv`, toCsv([headers, ...rows]), "text/csv");
+  };
+
+  const exportMatrixCsv = () => {
+    const headers = ["Alternativa", ...leaves.map((leaf) => leaf.criterion.name)];
+    const rows = model.alternatives.map((alternative) => [
+      alternative.name,
+      ...leaves.map((leaf) => String(leaf.criterion.performances?.[alternative.id] ?? "")),
+    ]);
+    downloadText(`matriz-${slugify(model.rootName || "decisao")}.csv`, toCsv([headers, ...rows]), "text/csv");
+  };
+
+  const importFile = async (file: File) => {
+    const text = await file.text();
+    const extension = file.name.split(".").pop()?.toLowerCase();
+    try {
+      if (extension === "json") {
+        const parsed = JSON.parse(text);
+        const importedModel = isDecisionModel(parsed) ? parsed : isDecisionModel(parsed?.model) ? parsed.model : undefined;
+        if (!importedModel) throw new Error("JSON nao contem um modelo MAVT valido.");
+        commit(() => sanitizeDecisionModel(importedModel));
+        setSelectedId(ROOT_ID);
+        setInspectorOpen(false);
+        setActiveModal(null);
+        setNotice("Arquivo JSON importado.");
+        return;
+      }
+
+      if (extension === "csv" || extension === "tsv") {
+        const importedModel = importMatrixTable(text, extension === "tsv" ? "\t" : ",", model);
+        commit(() => importedModel);
+        setSelectedId(ROOT_ID);
+        setInspectorOpen(false);
+        setActiveModal(null);
+        setNotice("Matriz importada.");
+        return;
+      }
+
+      throw new Error("Use um arquivo .json, .csv ou .tsv.");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Nao consegui importar o arquivo.";
+      setNotice(message);
+      window.alert(message);
+    }
+  };
+
+  const runAssistantCommand = async () => {
     const text = chatInput.trim();
-    if (!text) return;
+    if (!text || assistantThinking) return;
     setMessages((items) => [...items, { role: "user", text }]);
     setChatInput("");
-    const response = interpretCommand(text, model, commit, setSelectedId, setNotice);
-    setMessages((items) => [...items, { role: "assistant", text: response }]);
+    setAssistantThinking(true);
+
+    try {
+      const agentResponse = await requestAgentResponse(text, model);
+      const applied = applyAssistantOperations(agentResponse.operations, model, setNotice);
+      if (applied.model !== model) {
+        commit(() => applied.model);
+        if (applied.selectedId) setSelectedId(applied.selectedId);
+      }
+      setMessages((items) => [...items, { role: "assistant", text: agentResponse.reply }]);
+    } catch (error) {
+      const response = interpretCommand(text, model, commit, setSelectedId, setNotice);
+      const detail = error instanceof Error ? error.message : "erro desconhecido";
+      setMessages((items) => [
+        ...items,
+        {
+          role: "assistant",
+          text: `${response} Usei o agente local porque a IA real nao respondeu: ${detail}`,
+        },
+      ]);
+    } finally {
+      setAssistantThinking(false);
+    }
   };
 
   const sensitivityData = useMemo(() => {
@@ -729,10 +888,89 @@ function App() {
               <Table2 size={16} />
               Matriz
             </button>
+            <div className="file-menu">
+              <button onClick={() => setFileMenuOpen((open) => !open)}>
+                <FileJson size={16} />
+                Arquivos
+              </button>
+              {fileMenuOpen && (
+                <div className="file-menu-popover">
+                  <button
+                    onClick={() => {
+                      setFileMenuOpen(false);
+                      fileInputRef.current?.click();
+                    }}
+                  >
+                    <Upload size={16} />
+                    Importar
+                  </button>
+                  <button
+                    onClick={() => {
+                      setFileMenuOpen(false);
+                      exportCompleteJson();
+                    }}
+                  >
+                    <FileJson size={16} />
+                    Exportar JSON
+                  </button>
+                  <button
+                    onClick={() => {
+                      setFileMenuOpen(false);
+                      exportResultsCsv();
+                    }}
+                  >
+                    <Download size={16} />
+                    Exportar resultados
+                  </button>
+                  <button
+                    onClick={() => {
+                      setFileMenuOpen(false);
+                      exportMatrixCsv();
+                    }}
+                  >
+                    <Table2 size={16} />
+                    Exportar matriz CSV
+                  </button>
+                </div>
+              )}
+            </div>
+            <div className="file-menu">
+              <button onClick={() => setHelpMenuOpen((open) => !open)}>
+                <HelpCircle size={16} />
+                Ajuda
+              </button>
+              {helpMenuOpen && (
+                <div className="file-menu-popover help-menu-popover">
+                  {helpTopics.map((topic) => (
+                    <button
+                      key={topic.id}
+                      onClick={() => {
+                        setHelpTopic(topic.id);
+                        setHelpMenuOpen(false);
+                        setActiveModal("help");
+                      }}
+                    >
+                      {topic.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
             <button className="danger" onClick={resetDecision}>
               <RotateCcw size={16} />
               Reiniciar
             </button>
+            <input
+              ref={fileInputRef}
+              className="hidden-file-input"
+              type="file"
+              accept=".json,.csv,.tsv,application/json,text/csv,text/tab-separated-values"
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                if (file) void importFile(file);
+                event.target.value = "";
+              }}
+            />
           </div>
 
           <div className="history-controls">
@@ -748,10 +986,12 @@ function App() {
         <main className={`workspace ${chatOpen ? "with-chat" : ""}`}>
           <section className="tree-workspace">
             <div className="panel-heading">
-              <div>
-                <span className="eyebrow">Arvore de decisao</span>
-                <h2>{model.rootName}</h2>
-              </div>
+              <input
+                className="root-title-input"
+                value={model.rootName}
+                onChange={(event) => commit((current) => ({ ...current, rootName: event.target.value }))}
+                aria-label="Nome do problema central"
+              />
             </div>
             <div className="flow-wrap main-tree">
               <ReactFlow
@@ -801,14 +1041,34 @@ function App() {
                 </div>
               ))}
             </div>
+            <div className="prompt-chips" aria-label="Sugestoes para o agente">
+              {assistantShortcuts.map((shortcut) => (
+                <button
+                  key={shortcut.label}
+                  type="button"
+                  onClick={() => setChatInput(shortcut.prompt)}
+                  title={shortcut.prompt}
+                >
+                  {shortcut.label}
+                </button>
+              ))}
+            </div>
             <div className="chat-box">
-              <input
+              <textarea
                 value={chatInput}
                 onChange={(event) => setChatInput(event.target.value)}
-                onKeyDown={(event) => event.key === "Enter" && runAssistantCommand()}
-                placeholder="Ex: peso do preco para 35%"
+                onInput={(event) => autoResizeTextarea(event.currentTarget)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && !event.shiftKey) {
+                    event.preventDefault();
+                    void runAssistantCommand();
+                  }
+                }}
+                placeholder={assistantThinking ? "Agente pensando..." : "Ex: peso do preco para 35%"}
+                disabled={assistantThinking}
+                rows={1}
               />
-              <button onClick={runAssistantCommand} aria-label="Enviar comando">
+              <button onClick={runAssistantCommand} aria-label="Enviar comando" disabled={assistantThinking}>
                 <Sparkles size={18} />
               </button>
             </div>
@@ -888,6 +1148,12 @@ function App() {
             onPerformanceChange={setPerformance}
           />
         )}
+
+        {activeModal === "help" && (
+          <Modal title="Ajuda" size="compact" onClose={() => setActiveModal(null)}>
+            <HelpPanel topic={helpTopic} onTopicChange={setHelpTopic} />
+          </Modal>
+        )}
       </div>
     </ReactFlowProvider>
   );
@@ -908,6 +1174,311 @@ function updateAllLeaves(criteria: Criterion[], updater: (criterion: Criterion) 
   });
 }
 
+function downloadText(filename: string, content: string, type: string) {
+  const blob = new Blob([content], { type: `${type};charset=utf-8` });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+function toCsv(rows: Array<Array<string | number>>) {
+  return rows
+    .map((row) =>
+      row
+        .map((cell) => {
+          const value = String(cell ?? "");
+          return /[",\n;]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
+        })
+        .join(","),
+    )
+    .join("\n");
+}
+
+function parseDelimited(text: string, delimiter: string) {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let cell = "";
+  let quoted = false;
+
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    const next = text[index + 1];
+    if (char === '"' && quoted && next === '"') {
+      cell += '"';
+      index += 1;
+    } else if (char === '"') {
+      quoted = !quoted;
+    } else if (char === delimiter && !quoted) {
+      row.push(cell.trim());
+      cell = "";
+    } else if ((char === "\n" || char === "\r") && !quoted) {
+      if (char === "\r" && next === "\n") index += 1;
+      row.push(cell.trim());
+      if (row.some(Boolean)) rows.push(row);
+      row = [];
+      cell = "";
+    } else {
+      cell += char;
+    }
+  }
+
+  row.push(cell.trim());
+  if (row.some(Boolean)) rows.push(row);
+  return rows;
+}
+
+function importMatrixTable(text: string, delimiter: string, current: DecisionModel): DecisionModel {
+  const rows = parseDelimited(text, delimiter);
+  if (rows.length < 2) throw new Error("A planilha precisa ter cabecalho e pelo menos uma alternativa.");
+  const headers = rows[0].map((header) => header.trim()).filter(Boolean);
+  if (headers.length < 2 || normalizeText(headers[0]) !== "alternativa") {
+    throw new Error('A primeira coluna da planilha deve ser "Alternativa".');
+  }
+
+  const alternatives = rows.slice(1).map((row) => ({ id: uid("alt"), name: cleanName(row[0] || "Alternativa") }));
+  const leaves = headers.slice(1).map((name, columnIndex) => {
+    const criterion = createCriterion(name, 100 / Math.max(1, headers.length - 1), alternatives);
+    criterion.performances = Object.fromEntries(
+      alternatives.map((alternative, rowIndex) => {
+        const raw = rows[rowIndex + 1]?.[columnIndex + 1] ?? "";
+        const numeric = Number(raw.replace(",", "."));
+        return [alternative.id, Number.isFinite(numeric) && raw !== "" ? numeric : raw];
+      }),
+    );
+    return criterion;
+  });
+
+  return {
+    ...current,
+    alternatives,
+    criteria: normalizeSiblings(leaves),
+  };
+}
+
+function isDecisionModel(value: unknown): value is DecisionModel {
+  const model = value as DecisionModel;
+  return Boolean(
+    model &&
+      typeof model.rootName === "string" &&
+      Array.isArray(model.alternatives) &&
+      Array.isArray(model.criteria),
+  );
+}
+
+function sanitizeDecisionModel(model: DecisionModel): DecisionModel {
+  return {
+    rootName: model.rootName || "Decisao",
+    alternatives: model.alternatives.map((alternative) => ({
+      id: alternative.id || uid("alt"),
+      name: alternative.name || "Alternativa",
+    })),
+    criteria: normalizeTreeAfterRemoval(sanitizeCriteria(model.criteria)),
+  };
+}
+
+function sanitizeCriteria(criteria: Criterion[]): Criterion[] {
+  return criteria.map((criterion) => {
+    const children = criterion.children ? sanitizeCriteria(criterion.children) : undefined;
+    return {
+      ...criterion,
+      id: criterion.id || uid("crit"),
+      name: criterion.name || "Criterio",
+      weight: Number.isFinite(criterion.weight) ? criterion.weight : 100,
+      children,
+    };
+  });
+}
+
+function formatNumber(value: number) {
+  return value.toLocaleString("pt-BR", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
+function formatTooltipNumber(value: unknown): string | number {
+  return typeof value === "number" ? formatNumber(value) : String(value ?? "");
+}
+
+function slugify(value: string) {
+  return normalizeText(value).replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "mavt";
+}
+
+function autoResizeTextarea(element: HTMLTextAreaElement) {
+  element.style.height = "auto";
+  element.style.height = `${Math.min(element.scrollHeight, 132)}px`;
+}
+
+async function requestAgentResponse(message: string, model: DecisionModel): Promise<AgentResponse> {
+  const response = await fetch("/api/agent", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ message, model }),
+  });
+  const data = await response.json().catch(() => undefined);
+
+  if (!response.ok) {
+    throw new Error(data?.error ?? "falha no endpoint /api/agent");
+  }
+
+  return {
+    reply: typeof data?.reply === "string" ? data.reply : "Entendi.",
+    operations: Array.isArray(data?.operations) ? data.operations : [],
+  };
+}
+
+function applyAssistantOperations(
+  operations: AssistantOperation[],
+  model: DecisionModel,
+  setNotice: (text: string) => void,
+) {
+  let draft = model;
+  let selectedId: string | undefined;
+
+  for (const operation of operations) {
+    switch (operation.type) {
+      case "setRootName": {
+        const rootName = cleanName(operation.rootName ?? "");
+        if (rootName) draft = { ...draft, rootName };
+        break;
+      }
+      case "replaceAlternatives": {
+        const alternatives = uniqueNames(operation.alternatives ?? []).map((name) => ({ id: uid("alt"), name }));
+        if (alternatives.length > 0) {
+          draft = {
+            ...draft,
+            alternatives,
+            criteria: updateAllLeaves(draft.criteria, (criterion) => ({ ...criterion, performances: {} })),
+          };
+        }
+        break;
+      }
+      case "addAlternatives": {
+        const existing = draft.alternatives.map((alternative) => normalizeText(alternative.name));
+        const additions = uniqueNames(operation.alternatives ?? [])
+          .filter((name) => !existing.includes(normalizeText(name)))
+          .map((name) => ({ id: uid("alt"), name }));
+        if (additions.length > 0) draft = { ...draft, alternatives: [...draft.alternatives, ...additions] };
+        break;
+      }
+      case "replaceCriteria": {
+        const criteria = buildCriteriaFromAgentItems(operation.criteria ?? [], draft.alternatives);
+        if (criteria.length > 0) {
+          draft = { ...draft, criteria: normalizeSiblings(criteria) };
+          selectedId = ROOT_ID;
+        }
+        break;
+      }
+      case "removeAlternatives": {
+        for (const name of operation.alternatives ?? []) {
+          const alternative = findAlternativeByName(draft.alternatives, name);
+          if (alternative) draft = removeAlternativeFromModel(draft, alternative.id);
+        }
+        break;
+      }
+      case "addCriteria": {
+        const criteria = buildCriteriaFromAgentItems(operation.criteria ?? [], draft.alternatives);
+        if (criteria.length > 0) {
+          draft = {
+            ...draft,
+            criteria: criteria.reduce(
+              (items, criterion) => addWeightedSibling(items, criterion, criterion.weight),
+              draft.criteria,
+            ),
+          };
+          selectedId = criteria[0].id;
+        }
+        break;
+      }
+      case "removeCriteria": {
+        for (const name of operation.criteria ?? []) {
+          const criterion = findCriterionByName(draft.criteria, name);
+          if (!criterion) continue;
+          const parent = findParent(draft.criteria, criterion.id);
+          const canRemove = parent ? (parent.children?.length ?? 0) > 2 : draft.criteria.length > 2;
+          if (!canRemove) {
+            setNotice("Remocao bloqueada: o pai ficaria com apenas um filho.");
+            continue;
+          }
+          draft = { ...draft, criteria: normalizeTreeAfterRemoval(removeCriterion(draft.criteria, criterion.id)) };
+          selectedId = parent?.id ?? ROOT_ID;
+        }
+        break;
+      }
+      case "setCriterionWeight": {
+        const criterion = findCriterionByName(draft.criteria, operation.criterion ?? "");
+        const weight = Number(operation.weight);
+        if (!criterion || !Number.isFinite(weight)) break;
+        const parent = findParent(draft.criteria, criterion.id);
+        draft = !parent
+          ? { ...draft, criteria: normalizeSiblings(draft.criteria, criterion.id, weight) }
+          : {
+              ...draft,
+              criteria: updateCriterion(draft.criteria, parent.id, (item) => ({
+                ...item,
+                children: normalizeSiblings(item.children ?? [], criterion.id, weight),
+              })),
+            };
+        selectedId = parent?.id ?? ROOT_ID;
+        break;
+      }
+      case "addSubcriteria": {
+        const parent = findCriterionByName(draft.criteria, operation.criterion ?? "");
+        const names = uniqueNames(operation.subcriteria ?? []);
+        if (parent && names.length > 0) {
+          draft = addSubcriteriaToModel(draft, parent.id, names);
+          selectedId = parent.id;
+        }
+        break;
+      }
+      case "configureScale": {
+        const criterion = findCriterionByName(draft.criteria, operation.criterion ?? "");
+        const min = Number(operation.min);
+        const max = Number(operation.max);
+        if (!criterion || !isLeaf(criterion) || !Number.isFinite(min) || !Number.isFinite(max)) break;
+        const direction: Direction = operation.direction === "cost" ? "cost" : "benefit";
+        draft = {
+          ...draft,
+          criteria: updateCriterion(draft.criteria, criterion.id, (item) => ({
+            ...item,
+            scale: { min, max, direction, mode: "quantitative", autoBounds: false },
+          })),
+        };
+        selectedId = criterion.id;
+        break;
+      }
+      case "setPerformance": {
+        const criterion = findCriterionByName(draft.criteria, operation.criterion ?? "");
+        const alternative = findAlternativeByName(draft.alternatives, operation.alternative ?? "");
+        if (!criterion || !alternative || !isLeaf(criterion) || operation.value === undefined) break;
+        const value =
+          typeof operation.value === "number" || (typeof operation.value === "string" && operation.value.trim())
+            ? operation.value
+            : undefined;
+        if (value === undefined) break;
+        draft = {
+          ...draft,
+          criteria: updateCriterion(draft.criteria, criterion.id, (item) => ({
+            ...item,
+            performances: { ...(item.performances ?? {}), [alternative.id]: value },
+          })),
+        };
+        selectedId = criterion.id;
+        break;
+      }
+      default:
+        break;
+    }
+  }
+
+  return { model: draft, selectedId };
+}
+
 function interpretCommand(
   rawText: string,
   model: DecisionModel,
@@ -915,106 +1486,416 @@ function interpretCommand(
   setSelectedId: (id: string) => void,
   setNotice: (text: string) => void,
 ) {
-  const text = rawText.normalize("NFD").replace(/\p{Diacritic}/gu, "").toLowerCase();
-  const numberMatch = text.match(/(\d+(?:[,.]\d+)?)\s*%?/);
-  const parsedWeight = numberMatch ? Number(numberMatch[1].replace(",", ".")) : 20;
+  let draft = model;
+  let selectedAfter: string | undefined;
+  const replies: string[] = [];
+  const structured = interpretStructuredDescription(rawText, draft);
 
-  const addAlternativeMatch = text.match(/(?:adicione|inclua|crie)\s+(?:a\s+)?alternativa\s+(.+)/);
-  if (addAlternativeMatch) {
-    const name = titleCase(addAlternativeMatch[1].replace(/\s+com\s+.*/, "").trim());
-    const alternative = { id: uid("alt"), name };
-    commit((current) => ({ ...current, alternatives: [...current.alternatives, alternative] }));
-    return `Adicionei a alternativa ${name}.`;
+  if (structured.model !== draft) {
+    draft = structured.model;
+    replies.push(...structured.replies);
+    selectedAfter = ROOT_ID;
   }
 
-  const removeAlternativeMatch = text.match(/(?:remova|apague|exclua)\s+(?:a\s+)?(?:alternativa\s+)?(.+)/);
-  if (removeAlternativeMatch) {
-    const name = removeAlternativeMatch[1].trim();
-    const alternative = model.alternatives.find((item) => item.name.toLowerCase() === name);
-    if (!alternative) return "Nao encontrei essa alternativa. Confira o nome e tente novamente.";
-    commit((current) => ({
-      ...current,
-      alternatives: current.alternatives.filter((item) => item.id !== alternative.id),
-      criteria: updateAllLeaves(current.criteria, (criterion) => {
-        const performances = { ...(criterion.performances ?? {}) };
-        delete performances[alternative.id];
-        return { ...criterion, performances };
-      }),
-    }));
-    return `Removi ${alternative.name} da avaliacao.`;
+  for (const clause of splitAssistantClauses(rawText)) {
+    const result = applyAssistantClause(clause, draft, setNotice);
+    if (!result) continue;
+    draft = result.model;
+    replies.push(result.reply);
+    selectedAfter = result.selectedId ?? selectedAfter;
   }
 
-  const addCriterionMatch = text.match(/(?:adicione|inclua|crie)\s+(?:o\s+)?criterio\s+(.+?)(?:\s+com|\s+peso|$)/);
-  if (addCriterionMatch) {
-    const name = titleCase(addCriterionMatch[1].trim());
-    const criterion: Criterion = {
-      id: uid("crit"),
-      name,
-      weight: parsedWeight,
-      scale: { min: 0, max: 10, direction: "benefit" },
-      performances: {},
+  const uniqueReplies = Array.from(new Set(replies.filter(Boolean)));
+  if (draft !== model) {
+    commit(() => draft);
+    if (selectedAfter) setSelectedId(selectedAfter);
+    return uniqueReplies.length
+      ? uniqueReplies.join(" ")
+      : "Atualizei o modelo com as instrucoes que consegui interpretar.";
+  }
+
+  return "Ainda nao consegui transformar esse texto em alteracoes. Tente citar alternativas, criterios, pesos, subcriterios ou uma curva de valor.";
+}
+
+function applyAssistantClause(
+  rawClause: string,
+  model: DecisionModel,
+  setNotice: (text: string) => void,
+): { model: DecisionModel; reply: string; selectedId?: string } | undefined {
+  const clause = rawClause.trim();
+  const text = normalizeText(clause);
+  if (!clause || text.length < 3) return undefined;
+  if (isStructuredDescription(text)) return undefined;
+
+  const addSubcriteriaMatch = text.match(
+    /(?:adicione|inclua|crie)\s+(?:os?\s+)?subcriterios?\s+(.+?)\s+(?:ao|a|no|na|para\s+o|para\s+a)\s+(?:criterio\s+)?(.+)/,
+  );
+  if (addSubcriteriaMatch) {
+    const names = parseNameList(addSubcriteriaMatch[1]);
+    const parent = findCriterionByName(model.criteria, addSubcriteriaMatch[2]);
+    if (!parent) return { model, reply: "Nao encontrei o criterio que receberia esses subcriterios." };
+    const children = names.map((name, index) => createCriterion(name, 100 / Math.max(1, names.length), model.alternatives));
+    const next = {
+      ...model,
+      criteria: updateCriterion(model.criteria, parent.id, (criterion) => ({
+        ...criterion,
+        children: normalizeSiblings([...(criterion.children ?? []), ...children]),
+        scale: undefined,
+        performances: undefined,
+      })),
     };
-    commit((current) => ({ ...current, criteria: addWeightedSibling(current.criteria, criterion, parsedWeight) }));
-    setSelectedId(criterion.id);
-    return `Criei o criterio raiz ${name}. Os demais pesos foram ajustados para manter soma 100%.`;
+    return {
+      model: next,
+      reply: `Adicionei ${names.length} subcriterio${names.length === 1 ? "" : "s"} em ${parent.name}.`,
+      selectedId: parent.id,
+    };
   }
 
-  const removeCriterionMatch = text.match(/(?:remova|apague|exclua)\s+(?:o\s+)?criterio\s+(.+)/);
+  const removeAlternativeMatch = text.match(
+    /(?:remova|apague|exclua|delete)\s+(?:as?\s+)?alternativas?\s+(.+)/,
+  );
+  if (removeAlternativeMatch || text.match(/^(?:remova|apague|exclua|delete)\s+(.+)$/)) {
+    const target = removeAlternativeMatch?.[1] ?? text.replace(/^(?:remova|apague|exclua|delete)\s+/, "");
+    const alternative = findAlternativeByName(model.alternatives, target);
+    if (!alternative) return undefined;
+    return {
+      model: removeAlternativeFromModel(model, alternative.id),
+      reply: `Removi ${alternative.name} da avaliacao.`,
+    };
+  }
+
+  const addAlternativeMatch = text.match(
+    /(?:adicione|inclua|crie)\s+(?:as?\s+)?alternativas?\s+(.+)/,
+  );
+  if (addAlternativeMatch) {
+    const names = parseNameList(removeTrailingCommand(addAlternativeMatch[1]));
+    if (names.length === 0) return undefined;
+    const existing = model.alternatives.map((item) => normalizeText(item.name));
+    const additions = names
+      .filter((name) => !existing.includes(normalizeText(name)))
+      .map((name) => ({ id: uid("alt"), name }));
+    if (additions.length === 0) return { model, reply: "Essas alternativas ja existem no modelo." };
+    return {
+      model: { ...model, alternatives: [...model.alternatives, ...additions] },
+      reply: `Adicionei ${additions.map((item) => item.name).join(", ")} como alternativa${additions.length === 1 ? "" : "s"}.`,
+    };
+  }
+
+  const removeCriterionMatch = text.match(/(?:remova|apague|exclua|delete)\s+(?:o\s+)?criterio\s+(.+)/);
   if (removeCriterionMatch) {
-    const name = removeCriterionMatch[1].trim();
-    const criterion = flattenCriteria(model.criteria).find((item) => item.name.toLowerCase() === name);
-    if (!criterion) return "Nao encontrei esse criterio. Tente usar exatamente o nome exibido no no.";
+    const criterion = findCriterionByName(model.criteria, removeTrailingCommand(removeCriterionMatch[1]));
+    if (!criterion) return { model, reply: "Nao encontrei esse criterio. Tente usar o nome exibido no no." };
     const parent = findParent(model.criteria, criterion.id);
     const canRemove = parent ? (parent.children?.length ?? 0) > 2 : model.criteria.length > 2;
     if (!canRemove) {
       setNotice("Remocao bloqueada: o pai ficaria com apenas um filho.");
-      return "Nao removi esse criterio porque um no nao pode ficar com apenas um filho.";
+      return { model, reply: "Nao removi esse criterio porque um no nao pode ficar com apenas um filho." };
     }
-    commit((current) => ({ ...current, criteria: normalizeTreeAfterRemoval(removeCriterion(current.criteria, criterion.id)) }));
-    return `Removi o criterio ${criterion.name} e normalizei os pesos restantes.`;
+    return {
+      model: { ...model, criteria: normalizeTreeAfterRemoval(removeCriterion(model.criteria, criterion.id)) },
+      reply: `Removi o criterio ${criterion.name} e normalizei os pesos restantes.`,
+      selectedId: parent?.id ?? ROOT_ID,
+    };
   }
 
-  const weightMatch = text.match(/peso\s+(?:do|da|de)?\s*(.+?)\s+(?:para\s+)?(\d+(?:[,.]\d+)?)\s*%?/);
-  if (weightMatch) {
-    const name = weightMatch[1].trim();
-    const weight = Number(weightMatch[2].replace(",", "."));
-    const criterion = flattenCriteria(model.criteria).find((item) => item.name.toLowerCase() === name);
-    if (!criterion) return "Nao encontrei esse criterio para alterar o peso.";
-    const parent = findParent(model.criteria, criterion.id);
-    commit((current) => {
-      if (!parent) return { ...current, criteria: normalizeSiblings(current.criteria, criterion.id, weight) };
-      return {
-        ...current,
-        criteria: updateCriterion(current.criteria, parent.id, (item) => ({
-          ...item,
-          children: normalizeSiblings(item.children ?? [], criterion.id, weight),
-        })),
-      };
+  const addCriterionMatch = text.match(/(?:adicione|inclua|crie)\s+(?:os?\s+)?criterios?\s+(.+)/);
+  if (addCriterionMatch) {
+    const source = removeTrailingCommand(addCriterionMatch[1]);
+    const childrenMatch = source.match(/(.+?)\s+com\s+(?:os?\s+)?subcriterios?\s+(.+)/);
+    const parentName = childrenMatch ? cleanName(childrenMatch[1]) : undefined;
+    const names = childrenMatch && parentName ? [parentName] : parseWeightedItems(source).map((item) => item.name);
+    const weight = parseFirstNumber(source) ?? 20;
+    if (names.length === 0) return undefined;
+    const criteria = names.map((name) => {
+      if (!childrenMatch) return createCriterion(name, weight, model.alternatives);
+      const children = parseNameList(childrenMatch[2] ?? "").map((child) => createCriterion(child, 50, model.alternatives));
+      return createCriterion(name, weight, model.alternatives, normalizeSiblings(children));
     });
-    setSelectedId(parent?.id ?? ROOT_ID);
-    return `Atualizei ${criterion.name} para ${weight}% e redistribui os irmaos para soma 100%.`;
+    const nextCriteria = criteria.reduce(
+      (items, criterion) => addWeightedSibling(items, criterion, criterion.weight),
+      model.criteria,
+    );
+    return {
+      model: { ...model, criteria: nextCriteria },
+      reply: `Criei ${criteria.map((item) => item.name).join(", ")} como criterio${criteria.length === 1 ? "" : "s"} raiz.`,
+      selectedId: criteria[0]?.id,
+    };
+  }
+
+  const weightMatch = text.match(
+    /peso\s+(?:do|da|de|dos|das)?\s*(?:criterio\s+)?(.+?)\s+(?:para|=|em)\s+(\d+(?:[,.]\d+)?)\s*%?/,
+  );
+  if (weightMatch) {
+    const criterion = findCriterionByName(model.criteria, weightMatch[1]);
+    if (!criterion) return { model, reply: "Nao encontrei esse criterio para alterar o peso." };
+    const weight = Number(weightMatch[2].replace(",", "."));
+    const parent = findParent(model.criteria, criterion.id);
+    const next = !parent
+      ? { ...model, criteria: normalizeSiblings(model.criteria, criterion.id, weight) }
+      : {
+          ...model,
+          criteria: updateCriterion(model.criteria, parent.id, (item) => ({
+            ...item,
+            children: normalizeSiblings(item.children ?? [], criterion.id, weight),
+          })),
+        };
+    return {
+      model: next,
+      reply: `Atualizei ${criterion.name} para ${formatWeight(weight)}% e redistribuí os irmãos para soma 100%.`,
+      selectedId: parent?.id ?? ROOT_ID,
+    };
   }
 
   const scaleMatch = text.match(
-    /(?:defina|configure).*(.+?)\s+de\s+(\d+(?:[,.]\d+)?)\s+a\s+(\d+(?:[,.]\d+)?)(.*)/,
+    /(?:defina|configure|ajuste).*(?:criterio|curva|funcao|valor)?\s*(.+?)\s+de\s+(\d+(?:[,.]\d+)?)\s+a\s+(\d+(?:[,.]\d+)?)(.*)/,
   );
   if (scaleMatch) {
-    const name = scaleMatch[1].replace(/criterio|curva|funcao|valor|o|a/g, "").trim();
-    const criterion = flattenCriteria(model.criteria).find((item) => item.name.toLowerCase().includes(name));
-    if (!criterion || !isLeaf(criterion)) return "Nao encontrei uma folha compativel para configurar a curva.";
+    const criterion = findCriterionByName(model.criteria, scaleMatch[1]);
+    if (!criterion || !isLeaf(criterion)) return { model, reply: "Nao encontrei uma folha compativel para configurar a curva." };
     const min = Number(scaleMatch[2].replace(",", "."));
     const max = Number(scaleMatch[3].replace(",", "."));
     const tail = scaleMatch[4];
     const direction: Direction = tail.includes("menor") || tail.includes("custo") ? "cost" : "benefit";
-    commit((current) => ({
-      ...current,
-      criteria: updateCriterion(current.criteria, criterion.id, (item) => ({ ...item, scale: { min, max, direction } })),
-    }));
-    setSelectedId(criterion.id);
-    return `Configurei a curva de ${criterion.name}: ${min} a ${max}, ${direction === "cost" ? "menor e melhor" : "maior e melhor"}.`;
+    return {
+      model: {
+        ...model,
+        criteria: updateCriterion(model.criteria, criterion.id, (item) => ({
+          ...item,
+          scale: { min, max, direction, mode: "quantitative", autoBounds: false },
+        })),
+      },
+      reply: `Configurei a curva de ${criterion.name}: ${min} a ${max}, ${direction === "cost" ? "menor e melhor" : "maior e melhor"}.`,
+      selectedId: criterion.id,
+    };
   }
 
-  return "Ainda sou um agente simulado. Entendi melhor comandos para adicionar/remover alternativas, criar criterios, alterar pesos e configurar curvas.";
+  return undefined;
+}
+
+function interpretStructuredDescription(rawText: string, model: DecisionModel) {
+  if (!isStructuredDescription(normalizeText(rawText))) return { model, replies: [] as string[] };
+
+  let draft = model;
+  const replies: string[] = [];
+  const rootName = extractFirst(rawText, [
+    /(?:problema central|objetivo|decis[aã]o)\s*(?:e|é|eh|:|ser[aá]|sera)?\s+([\s\S]+?)(?=,?\s+(?:onde|com|terei|e\s+(?:terei|os|as)|crit[eé]rios?|alternativas?)|[.;\n]|$)/i,
+  ]);
+  const alternativesText = extractFirst(rawText, [
+    /(?:as\s+)?alternativas?\s*(?:s[aã]o|ser[aã]o|:)\s+([\s\S]+?)(?=,?\s+(?:e\s+o\s+problema|e\s+a\s+decis[aã]o|onde|com\s+os\s+crit[eé]rios|terei\s+os\s+crit[eé]rios|os\s+crit[eé]rios|crit[eé]rios?\s*(?:s[aã]o|:))|[.;\n]|$)/i,
+  ]);
+  const criteriaText = extractFirst(rawText, [
+    /(?:terei\s+os\s+|com\s+os\s+|os\s+|meus\s+)?crit[eé]rios?\s*(?:s[aã]o|ser[aã]o|:)?\s+([\s\S]+?)(?=,?\s+(?:com\s+os\s+subcrit[eé]rios|subcrit[eé]rios|e\s+os\s+subcrit[eé]rios|alternativas?|problema central)|[.;\n]|$)/i,
+  ]);
+
+  if (rootName) {
+    draft = { ...draft, rootName: cleanName(rootName) };
+    replies.push(`Atualizei o problema central para "${draft.rootName}".`);
+  }
+
+  if (alternativesText) {
+    const alternatives = parseNameList(alternativesText).map((name) => ({ id: uid("alt"), name }));
+    if (alternatives.length > 0) {
+      draft = { ...draft, alternatives };
+      replies.push(`Substitui as alternativas por ${alternatives.map((item) => item.name).join(", ")}.`);
+    }
+  }
+
+  if (criteriaText) {
+    const weightedItems = parseWeightedItems(criteriaText);
+    if (weightedItems.length > 0) {
+      const criteria = weightedItems.map((item) => createCriterion(item.name, item.weight ?? 100 / weightedItems.length, draft.alternatives));
+      draft = { ...draft, criteria: normalizeSiblings(criteria) };
+      replies.push(`Montei os criterios principais: ${criteria.map((item) => item.name).join(", ")}.`);
+    }
+  }
+
+  const subcriteriaChanges = parseSubcriteriaDescriptions(rawText, draft);
+  if (subcriteriaChanges.model !== draft) {
+    draft = subcriteriaChanges.model;
+    replies.push(...subcriteriaChanges.replies);
+  }
+
+  return { model: draft, replies };
+}
+
+function parseSubcriteriaDescriptions(rawText: string, model: DecisionModel) {
+  let draft = model;
+  const replies: string[] = [];
+  const explicitPatterns = [
+    /crit[eé]rio\s+(.+?)\s+com\s+(?:os?\s+)?subcrit[eé]rios?\s+([\s\S]+?)(?=[.;\n]|$)/gi,
+    /subcrit[eé]rios?\s+(?:de|do|da|para|no|na)\s+(?:o\s+|a\s+)?(.+?)\s*(?:s[aã]o|:)?\s+([\s\S]+?)(?=[.;\n]|$)/gi,
+  ];
+
+  for (const pattern of explicitPatterns) {
+    for (const match of rawText.matchAll(pattern)) {
+      const parent = findCriterionByName(draft.criteria, match[1]);
+      const names = parseNameList(match[2]);
+      if (!parent || names.length === 0) continue;
+      draft = addSubcriteriaToModel(draft, parent.id, names);
+      replies.push(`Adicionei subcriterios em ${parent.name}: ${names.join(", ")}.`);
+    }
+  }
+
+  const global = rawText.match(/com\s+(?:os?\s+)?subcrit[eé]rios?\s+([\s\S]+?)(?=[.;\n]|$)/i);
+  if (global && flattenCriteria(draft.criteria).length === 1) {
+    const parent = draft.criteria[0];
+    const names = parseNameList(global[1]);
+    if (names.length > 0) {
+      draft = addSubcriteriaToModel(draft, parent.id, names);
+      replies.push(`Adicionei subcriterios em ${parent.name}: ${names.join(", ")}.`);
+    }
+  }
+
+  return { model: draft, replies };
+}
+
+function addSubcriteriaToModel(model: DecisionModel, parentId: string, names: string[]) {
+  const children = names.map((name) => createCriterion(name, 100 / names.length, model.alternatives));
+  return {
+    ...model,
+    criteria: updateCriterion(model.criteria, parentId, (criterion) => ({
+      ...criterion,
+      children: normalizeSiblings([...(criterion.children ?? []), ...children]),
+      scale: undefined,
+      performances: undefined,
+    })),
+  };
+}
+
+function buildCriteriaFromAgentItems(
+  items: Array<{ name?: string; weight?: number; subcriteria?: string[] }>,
+  alternatives: Alternative[],
+) {
+  return items
+    .map((item) => {
+      const name = cleanName(item.name ?? "");
+      if (!name) return undefined;
+      const subcriteria = uniqueNames(item.subcriteria ?? []);
+      const children =
+        subcriteria.length > 0
+          ? normalizeSiblings(subcriteria.map((child) => createCriterion(child, 100 / subcriteria.length, alternatives)))
+          : undefined;
+      return createCriterion(name, clamp(Number(item.weight ?? 20), 0, 100), alternatives, children);
+    })
+    .filter((criterion): criterion is Criterion => Boolean(criterion));
+}
+
+function splitAssistantClauses(rawText: string) {
+  return rawText
+    .split(/[\n.;]+|\s+e\s+(?=(?:adicione|inclua|crie|remova|apague|exclua|delete|peso|defina|configure|ajuste)\b)/i)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function isStructuredDescription(text: string) {
+  return (
+    /problema central|objetivo/.test(text) ||
+    /alternativas?\s+(?:sao|serao|:)/.test(text) ||
+    /(?:terei|com|os|meus)\s+os?\s+criterios?/.test(text) ||
+    /criterios?\s+(?:sao|serao|:)/.test(text)
+  );
+}
+
+function createCriterion(name: string, weight: number, alternatives: Alternative[], children?: Criterion[]): Criterion {
+  const hasChildren = (children?.length ?? 0) > 0;
+  return {
+    id: uid("crit"),
+    name,
+    weight,
+    children: hasChildren ? children : undefined,
+    scale: hasChildren ? undefined : { min: 0, max: 10, direction: "benefit", mode: "quantitative" },
+    performances: hasChildren ? undefined : Object.fromEntries(alternatives.map((alternative) => [alternative.id, ""])),
+  };
+}
+
+function removeAlternativeFromModel(model: DecisionModel, id: string) {
+  return {
+    ...model,
+    alternatives: model.alternatives.filter((item) => item.id !== id),
+    criteria: updateAllLeaves(model.criteria, (criterion) => {
+      const performances = { ...(criterion.performances ?? {}) };
+      delete performances[id];
+      return { ...criterion, performances };
+    }),
+  };
+}
+
+function findAlternativeByName(alternatives: Alternative[], name: string) {
+  const target = normalizeText(cleanName(name));
+  return (
+    alternatives.find((item) => normalizeText(item.name) === target) ??
+    alternatives.find((item) => normalizeText(item.name).includes(target) || target.includes(normalizeText(item.name)))
+  );
+}
+
+function findCriterionByName(criteria: Criterion[], name: string) {
+  const target = normalizeText(cleanName(name));
+  return (
+    flattenCriteria(criteria).find((item) => normalizeText(item.name) === target) ??
+    flattenCriteria(criteria).find((item) => normalizeText(item.name).includes(target) || target.includes(normalizeText(item.name)))
+  );
+}
+
+function parseWeightedItems(value: string) {
+  return parseNameList(value).map((item) => {
+    const weight = parseFirstNumber(item);
+    return {
+      name: cleanName(item.replace(/\b(?:peso|com\s+peso|ponderacao)\b/gi, "").replace(/\d+(?:[,.]\d+)?\s*%?/g, "")),
+      weight,
+    };
+  }).filter((item) => item.name);
+}
+
+function parseNameList(value: string) {
+  return removeTrailingCommand(value)
+    .replace(/\s+(?:e|ou)\s+/gi, ",")
+    .split(/[,;/]+/)
+    .map(cleanName)
+    .filter(Boolean);
+}
+
+function uniqueNames(values: string[]) {
+  const seen = new Set<string>();
+  return values
+    .map(cleanName)
+    .filter((name) => {
+      const key = normalizeText(name);
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+}
+
+function cleanName(value: string) {
+  return titleCase(
+    value
+      .replace(/\[[^\]]*\]/g, "")
+      .replace(/\b(?:o|a|os|as|um|uma|criterio|criterios|critério|critérios|alternativa|alternativas|subcriterio|subcriterios|subcritério|subcritérios)\b/gi, "")
+      .replace(/\b(?:sao|são|serao|serão|sera|será|eh|e|é|com|peso|para|ao|no|na|do|da|de)\b$/gi, "")
+      .replace(/[:.]+$/g, "")
+      .trim(),
+  );
+}
+
+function normalizeText(value: string) {
+  return value.normalize("NFD").replace(/\p{Diacritic}/gu, "").toLowerCase().trim();
+}
+
+function parseFirstNumber(value: string) {
+  const match = value.match(/(\d+(?:[,.]\d+)?)\s*%?/);
+  return match ? Number(match[1].replace(",", ".")) : undefined;
+}
+
+function removeTrailingCommand(value: string) {
+  return value.replace(/\s+(?:e\s+)?(?:adicione|inclua|crie|remova|apague|exclua|delete|peso|defina|configure|ajuste)\b[\s\S]*$/i, "");
+}
+
+function extractFirst(value: string, patterns: RegExp[]) {
+  for (const pattern of patterns) {
+    const match = value.match(pattern);
+    if (match?.[1]) return match[1];
+  }
+  return "";
 }
 
 function titleCase(value: string) {
@@ -1089,18 +1970,19 @@ function CriterionInspector({
       {!leaf && (
         <div className="weight-editor">
           <div className="section-title">Pesos dos filhos</div>
-          <p className="helper-text">Ajuste um peso e os irmaos serao redistribuidos automaticamente.</p>
+          <p className="helper-text">Ajuste um peso e os irmãos serão redistribuídos automaticamente.</p>
 
           {children.map((child) => (
             <div className="weight-row" key={child.id}>
               <div>
                 <strong>{child.name}</strong>
-                <span>{isLeaf(child) ? "Folha de valor" : "Criterio composto"}</span>
+                <span>{isLeaf(child) ? "Folha de valor" : "Critério composto"}</span>
               </div>
               <input
                 type="range"
                 min="0"
                 max="100"
+                step="0.01"
                 value={child.weight}
                 onChange={(event) => onSiblingWeightChange(child.id, Number(event.target.value))}
               />
@@ -1108,6 +1990,7 @@ function CriterionInspector({
                 type="number"
                 min="0"
                 max="100"
+                step="0.01"
                 value={displayWeight(child.weight)}
                 onChange={(event) => onSiblingWeightChange(child.id, Number(event.target.value))}
               />
@@ -1117,7 +2000,7 @@ function CriterionInspector({
           <div className="button-row">
             <button onClick={onAddChild}>
               <Plus size={16} />
-              Subcriterio
+              Subcritério
             </button>
             {!isRoot && (
               <button className="danger" onClick={onConvertToLeaf}>
@@ -1132,11 +2015,11 @@ function CriterionInspector({
       {leaf && criterion && (
         <div className="leaf-editor">
           <div className="readonly-weight">
-            Peso local: <strong>{displayWeight(criterion.weight)}%</strong>
+            Peso local: <strong>{formatWeight(criterion.weight)}%</strong>
           </div>
-          <div className="section-title">Funcao de valor</div>
+          <div className="section-title">Função de valor</div>
           <label className="field">
-            Tipo de metrica
+            Tipo de métrica
             <select
               value={scaleMode}
               onChange={(event) => {
@@ -1176,11 +2059,11 @@ function CriterionInspector({
                     }))
                   }
                 />
-                Ajustar minimo e maximo automaticamente pelos valores das alternativas
+                Ajustar mínimo e máximo automaticamente pelos valores das alternativas
               </label>
               <div className="field-grid">
                 <label className="field">
-                  Minimo
+                  Mínimo
                   <input
                     type="number"
                     value={scale.min}
@@ -1194,7 +2077,7 @@ function CriterionInspector({
                   />
                 </label>
                 <label className="field">
-                  Maximo
+                  Máximo
                   <input
                     type="number"
                     value={scale.max}
@@ -1209,7 +2092,7 @@ function CriterionInspector({
                 </label>
               </div>
               <label className="field">
-                Direcao
+                Direção
                 <select
                   value={scale.manualCurve === true ? "manual" : scale.direction}
                   onChange={(event) => {
@@ -1239,7 +2122,7 @@ function CriterionInspector({
               </label>
               {scale.manualCurve === true && (
                 <div className="curve-editor">
-                  <p className="helper-text">O score sera interpolado entre os pontos definidos.</p>
+                  <p className="helper-text">O score será interpolado entre os pontos definidos.</p>
                   {valuePoints.map((point) => (
                     <div className="qualitative-row" key={point.id}>
                       <input
@@ -1343,7 +2226,7 @@ function CriterionInspector({
 
           {scaleMode === "qualitative" && (
             <div className="qualitative-editor">
-              <div className="section-title">Opcoes qualitativas</div>
+              <div className="section-title">Opções qualitativas</div>
               {qualitativeOptions.map((option) => (
                 <div className="qualitative-row" key={option.id}>
                   <input
@@ -1501,7 +2384,7 @@ function ResultsPanel({
       <div className="winner-strip">
         <span>Melhor alternativa</span>
         <strong>{results[0]?.name ?? "Sem dados"}</strong>
-        <b>{Math.round(results[0]?.score ?? 0)} pts</b>
+        <b>{formatNumber(results[0]?.score ?? 0)} pts</b>
       </div>
 
       <div className="chart-card">
@@ -1511,7 +2394,7 @@ function ResultsPanel({
             <CartesianGrid strokeDasharray="3 3" vertical={false} />
             <XAxis dataKey="name" />
             <YAxis domain={[0, 100]} />
-            <Tooltip />
+            <Tooltip formatter={(value) => formatTooltipNumber(value)} />
             <Bar dataKey="score" radius={[8, 8, 0, 0]}>
               {results.map((entry, index) => (
                 <Cell key={entry.id} fill={colors[index % colors.length]} />
@@ -1528,7 +2411,7 @@ function ResultsPanel({
             <CartesianGrid strokeDasharray="3 3" vertical={false} />
             <XAxis dataKey="name" />
             <YAxis />
-            <Tooltip />
+            <Tooltip formatter={(value) => formatTooltipNumber(value)} />
             <Legend />
             {leaves.map((leaf, index) => (
               <Bar key={leaf.criterion.id} dataKey={leaf.criterion.name} stackId="a" fill={colors[index % colors.length]} />
@@ -1554,10 +2437,10 @@ function ResultsPanel({
               {results.map((result) => (
                 <tr key={result.id}>
                   <td>{result.name}</td>
-                  <td>{result.score.toFixed(1)}</td>
+                  <td>{formatNumber(result.score)}</td>
                   {leaves.map((leaf) => {
                     const contribution = result.contributions.find((item) => item.id === leaf.criterion.id);
-                    return <td key={leaf.criterion.id}>{(contribution?.value ?? 0).toFixed(1)}</td>;
+                    return <td key={leaf.criterion.id}>{formatNumber(contribution?.value ?? 0)}</td>;
                   })}
                 </tr>
               ))}
@@ -1582,7 +2465,7 @@ function ResultsPanel({
             <CartesianGrid strokeDasharray="3 3" />
             <XAxis dataKey="ajuste" />
             <YAxis domain={[0, 100]} />
-            <Tooltip />
+            <Tooltip formatter={(value) => formatTooltipNumber(value)} />
             <Legend />
             {alternatives.map((alternative, index) => (
               <Line
@@ -1645,7 +2528,7 @@ function MatrixModal({
   onPerformanceChange: (criterionId: string, alternativeId: string, value: number | string) => void;
 }) {
   return (
-    <Modal title="Matriz de desempenho" size="large" onClose={onClose}>
+    <Modal title="Matriz de desempenho" size="matrix" onClose={onClose}>
       <div className="matrix-wrap">
         <table className="matrix">
           <thead>
@@ -1689,6 +2572,126 @@ function MatrixModal({
         </table>
       </div>
     </Modal>
+  );
+}
+
+function HelpPanel({ topic, onTopicChange }: { topic: HelpTopic; onTopicChange: (topic: HelpTopic) => void }) {
+  return (
+    <div className="help-panel">
+      <div className="help-tabs">
+        {helpTopics.map((item) => (
+          <button
+            key={item.id}
+            className={topic === item.id ? "selected" : ""}
+            onClick={() => onTopicChange(item.id)}
+          >
+            {item.label}
+          </button>
+        ))}
+      </div>
+      <div className="help-content">{renderHelpTopic(topic)}</div>
+    </div>
+  );
+}
+
+function renderHelpTopic(topic: HelpTopic) {
+  if (topic === "method") {
+    return (
+      <>
+        <h3>O que e o metodo MAVT</h3>
+        <p>
+          MAVT e um metodo de apoio a decisao multicriterio. Ele compara alternativas usando criterios, pesos e
+          funcoes de valor, transformando desempenhos diferentes em uma pontuacao comum.
+        </p>
+        <p>
+          A ideia central e separar julgamento em partes: o que importa, quanto importa e como cada alternativa se
+          comporta em cada criterio.
+        </p>
+      </>
+    );
+  }
+
+  if (topic === "steps") {
+    return (
+      <>
+        <h3>Passo a passo MAVT</h3>
+        <ol>
+          <li>Defina o problema central no titulo da arvore.</li>
+          <li>Liste as alternativas que serao comparadas.</li>
+          <li>Crie criterios e subcriterios, mantendo a estrutura clara.</li>
+          <li>Ajuste os pesos locais para representar importancia relativa.</li>
+          <li>Configure a funcao de valor de cada folha.</li>
+          <li>Preencha a matriz de desempenho.</li>
+          <li>Abra Resultados para comparar pontuacao, contribuicao e sensibilidade.</li>
+        </ol>
+      </>
+    );
+  }
+
+  if (topic === "agent") {
+    return (
+      <>
+        <h3>Agente MAVT</h3>
+        <p>
+          O chat pode editar a decisao por linguagem natural. Ele entende comandos curtos e descricoes mais completas.
+        </p>
+        <ul>
+          <li>remova a alternativa Corolla</li>
+          <li>adicione criterio risco com peso 20%</li>
+          <li>configure preco de 0 a 200 menor melhor</li>
+          <li>as alternativas sao Alfa, Beta e Gama; os criterios sao custo, qualidade e prazo</li>
+        </ul>
+        <p>Use Shift+Enter para escrever mensagens longas em varias linhas.</p>
+      </>
+    );
+  }
+
+  if (topic === "files") {
+    return (
+      <>
+        <h3>Importar e exportar</h3>
+        <p>O menu Arquivos permite salvar ou carregar dados do estudo.</p>
+        <ul>
+          <li>JSON completo salva arvore, alternativas, valores e resultados calculados.</li>
+          <li>CSV de resultados exporta a tabela de pontuacoes.</li>
+          <li>CSV da matriz exporta alternativas e valores por criterio folha.</li>
+          <li>Importar CSV espera a primeira coluna como Alternativa e as demais como criterios.</li>
+        </ul>
+      </>
+    );
+  }
+
+  if (topic === "results") {
+    return (
+      <>
+        <h3>Resultados e sensibilidade</h3>
+        <p>
+          A pontuacao total combina valor normalizado e peso global de cada criterio folha. A melhor alternativa e a
+          maior pontuacao total.
+        </p>
+        <p>
+          O grafico de contribuicao mostra quais criterios explicam a pontuacao. A sensibilidade testa como o ranking
+          muda quando um criterio recebe mais ou menos peso.
+        </p>
+      </>
+    );
+  }
+
+  return (
+    <>
+      <h3>Como usar o software</h3>
+      <p>
+        Comece editando o nome do problema na parte superior da arvore. Clique nos nos para editar nomes, pesos,
+        subcriterios, funcoes de valor e valores das alternativas.
+      </p>
+      <p>
+        Use os botoes Alternativa e Matriz para preencher dados manualmente. Use Resultados para abrir a analise MAVT.
+        O menu Arquivos salva, exporta ou importa estudos.
+      </p>
+      <p>
+        Se preferir, descreva a decisao no Agente MAVT e deixe o chat montar ou ajustar a estrutura para voce.
+      </p>
+    </>
   );
 }
 
