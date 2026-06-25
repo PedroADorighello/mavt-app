@@ -18,13 +18,13 @@ export function mavtAgentPlugin(options = {}) {
 }
 async function handleAgentRequest(request, response, options) {
     if (request.method !== "POST") {
-        sendJson(response, 405, { error: "Metodo nao permitido." });
+        sendJson(response, 405, { error: "Método não permitido." });
         return;
     }
     const apiKey = options.apiKey;
     if (!apiKey) {
         sendJson(response, 401, {
-            error: "OPENAI_API_KEY nao configurada. Defina a chave em .env ou no ambiente antes de iniciar o app.",
+            error: "OPENAI_API_KEY não configurada. Defina a chave em .env ou no ambiente antes de iniciar o app.",
         });
         return;
     }
@@ -56,7 +56,7 @@ async function handleAgentRequest(request, response, options) {
     const parsed = parseJsonObject(outputText);
     if (!parsed) {
         sendJson(response, 502, {
-            error: "A IA nao retornou um JSON valido.",
+            error: "A IA não retornou um JSON válido.",
             preview: outputText.slice(0, 500),
         });
         return;
@@ -128,29 +128,29 @@ async function callCompatibleChat(apiKey, options, payload) {
 }
 function buildSystemPrompt() {
     return [
-        "Voce e um agente especialista em MAVT para um app de decisao multicriterio.",
+        "Você é um agente especialista em MAVT para um app de decisão multicritério.",
         "Sua tarefa e interpretar a mensagem do usuario e retornar somente JSON valido, sem markdown.",
-        "Nao invente dados numericos de desempenho. Se o usuario nao der valores, deixe o app criar campos vazios.",
+        "Não invente dados numéricos de desempenho. Se o usuário não der valores, deixe o app criar campos vazios.",
         "Use nomes em portugues quando o usuario escrever em portugues.",
         "Retorne no formato:",
         '{"reply":"texto curto em portugues","operations":[]}',
-        "Operacoes aceitas:",
+        "Operações aceitas:",
         '{"type":"setRootName","rootName":"Escolher carro"}',
         '{"type":"replaceAlternatives","alternatives":["A","B"]}',
         '{"type":"addAlternatives","alternatives":["A"]}',
         '{"type":"removeAlternatives","alternatives":["A"]}',
-        '{"type":"replaceCriteria","criteria":[{"name":"Custo","weight":40,"subcriteria":["Preco","Manutencao"]}]}',
-        '{"type":"addCriteria","criteria":[{"name":"Custo","weight":40,"subcriteria":["Preco","Manutencao"]}]}',
+        '{"type":"replaceCriteria","criteria":[{"name":"Custo","weight":40,"subcriteria":["Preço","Manutenção"]}]}',
+        '{"type":"addCriteria","criteria":[{"name":"Custo","weight":40,"subcriteria":["Preço","Manutenção"]}]}',
         '{"type":"removeCriteria","criteria":["Custo"]}',
         '{"type":"setCriterionWeight","criterion":"Custo","weight":40}',
-        '{"type":"addSubcriteria","criterion":"Custo","subcriteria":["Preco","Manutencao"]}',
-        '{"type":"configureScale","criterion":"Preco","min":0,"max":100,"direction":"cost"}',
-        '{"type":"setPerformance","criterion":"Preco","alternative":"Alfa","value":120}',
+        '{"type":"addSubcriteria","criterion":"Custo","subcriteria":["Preço","Manutenção"]}',
+        '{"type":"configureScale","criterion":"Preço","min":0,"max":100,"direction":"cost"}',
+        '{"type":"setPerformance","criterion":"Preço","alternative":"Alfa","value":120}',
         "direction deve ser benefit para maior melhor, ou cost para menor melhor.",
-        "Use setPerformance quando o usuario informar valores de alternativas na matriz de desempenho.",
-        "Use replaceCriteria, nao addCriteria, quando o usuario disser que os criterios sao, serao, ou descrever o problema inteiro.",
-        "Use replaceAlternatives quando o usuario disser que as alternativas sao ou descrever o problema inteiro.",
-        "Se o pedido for ambiguo, retorne operations vazia e explique a duvida no reply.",
+        "Use setPerformance quando o usuário informar valores de alternativas na matriz de desempenho.",
+        "Use replaceCriteria, não addCriteria, quando o usuário disser que os critérios são, serão, ou descrever o problema inteiro.",
+        "Use replaceAlternatives quando o usuário disser que as alternativas são ou descrever o problema inteiro.",
+        "Se o pedido for ambíguo, retorne operations vazia e explique a dúvida no reply.",
     ].join("\n");
 }
 function compactDecisionModel(model) {

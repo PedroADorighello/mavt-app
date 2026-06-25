@@ -198,6 +198,10 @@ p {
   padding: 16px 18px;
 }
 
+.tree-title-heading {
+  padding: 8px 14px;
+}
+
 .panel-heading.flush {
   border-bottom: 0;
   padding: 0 0 14px;
@@ -258,22 +262,22 @@ p {
   background: transparent;
   border-color: transparent;
   color: #22313f;
-  font-size: 20px;
+  font-size: 18px;
   font-weight: 800;
-  min-height: 40px;
-  padding: 4px 0;
+  min-height: 32px;
+  padding: 2px 0;
 }
 
 .root-title-input:hover {
   background: #f7fbfa;
   border-color: #d8e5e7;
-  padding-inline: 10px;
+  padding-inline: 8px;
 }
 
 .root-title-input:focus {
   background: #fff;
   border-color: #78a6c8;
-  padding-inline: 10px;
+  padding-inline: 8px;
 }
 
 .eyebrow,
@@ -515,6 +519,12 @@ p {
   box-shadow: none;
   overflow: auto;
   padding: 16px;
+}
+
+.results-actions {
+  align-items: center;
+  display: flex;
+  gap: 10px;
 }
 
 .winner-strip {
@@ -869,5 +879,60 @@ p {
   .weight-row,
   .qualitative-row {
     grid-template-columns: 1fr;
+  }
+}
+
+@media print {
+  body {
+    background: #fff;
+  }
+
+  .topbar,
+  .workspace,
+  .chat-restore,
+  .modal-backdrop:not(:has(.results-window)) {
+    display: none !important;
+  }
+
+  .modal-backdrop {
+    background: #fff;
+    display: block;
+    inset: auto;
+    padding: 0;
+    position: static;
+  }
+
+  .modal,
+  .modal.large {
+    box-shadow: none;
+    height: auto;
+    max-height: none;
+    max-width: none;
+    overflow: visible;
+    padding: 0;
+    width: 100%;
+  }
+
+  .modal-header {
+    margin-bottom: 8px;
+  }
+
+  .modal-header .icon-button,
+  .results-actions button,
+  .chart-title-row select {
+    display: none !important;
+  }
+
+  .results-window,
+  .results-panel {
+    height: auto;
+    min-height: 0;
+    overflow: visible;
+    padding: 0;
+  }
+
+  .chart-card {
+    break-inside: avoid;
+    page-break-inside: avoid;
   }
 }

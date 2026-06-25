@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   Background,
@@ -19,6 +19,7 @@ import {
   Download,
   FileJson,
   HelpCircle,
+  Printer,
   Plus,
   Redo2,
   RotateCcw,
@@ -35,6 +36,7 @@ import {
   BarChart,
   CartesianGrid,
   Cell,
+  LabelList,
   Legend,
   Line,
   LineChart,
@@ -235,6 +237,10 @@ const sumWeights = (items: Criterion[]) => items.reduce((sum, item) => sum + Mat
 const displayWeight = (value: number) => Number(value.toFixed(2));
 const formatWeight = (value: number) =>
   displayWeight(value).toLocaleString("pt-BR", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+const parseDecimalInput = (value: string) => {
+  const parsed = Number(value.replace(",", "."));
+  return Number.isFinite(parsed) ? parsed : undefined;
+};
 
 function findCriterion(criteria: Criterion[], id: string): Criterion | undefined {
   for (const criterion of criteria) {
@@ -601,11 +607,6 @@ function App() {
   };
 
   const resetDecision = () => {
-    const confirmed = window.confirm(
-      "Reiniciar apagará todas as alternativas e substituirá a árvore atual por um nó raiz com duas folhas. Deseja continuar?",
-    );
-    if (!confirmed) return;
-
     const first: Criterion = {
       id: uid("crit"),
       name: "Critério 1",
@@ -688,7 +689,7 @@ function App() {
   const deleteSelected = () => {
     if (selectedId === ROOT_ID) return;
     if (!canDeleteSelected) {
-      setNotice("Nao e possivel remover este no porque o pai ficaria com apenas um filho.");
+      setNotice("Não é possível remover este nó porque o pai ficaria com apenas um filho.");
       return;
     }
     commit((current) => ({ ...current, criteria: normalizeTreeAfterRemoval(removeCriterion(current.criteria, selectedId)) }));
@@ -725,11 +726,6 @@ function App() {
 
   const convertSelectedToLeaf = () => {
     if (selectedId === ROOT_ID || !selectedCriterion || isLeaf(selectedCriterion)) return;
-    const confirmed = window.confirm(
-      `Transformar "${selectedCriterion.name}" em folha de curva de valor apagará todos os seus subcriterios. Deseja continuar?`,
-    );
-    if (!confirmed) return;
-
     commit((current) => ({
       ...current,
       criteria: updateCriterion(current.criteria, selectedId, (criterion) => ({
@@ -743,7 +739,7 @@ function App() {
 
   const exportCompleteJson = () => {
     downloadText(
-      `mavt-${slugify(model.rootName || "decisao")}.json`,
+      `mavt-${slugify(model.rootName || "decisão")}.json`,
       JSON.stringify(
         {
           version: 1,
@@ -765,7 +761,7 @@ function App() {
       formatNumber(result.score),
       ...leaves.map((leaf) => formatNumber(result.contributions.find((item) => item.id === leaf.criterion.id)?.value ?? 0)),
     ]);
-    downloadText(`resultados-${slugify(model.rootName || "decisao")}.csv`, toCsv([headers, ...rows]), "text/csv");
+    downloadText(`resultados-${slugify(model.rootName || "decisão")}.csv`, toCsv([headers, ...rows]), "text/csv");
   };
 
   const exportMatrixCsv = () => {
@@ -774,7 +770,11 @@ function App() {
       alternative.name,
       ...leaves.map((leaf) => String(leaf.criterion.performances?.[alternative.id] ?? "")),
     ]);
-    downloadText(`matriz-${slugify(model.rootName || "decisao")}.csv`, toCsv([headers, ...rows]), "text/csv");
+    downloadText(`matriz-${slugify(model.rootName || "decisão")}.csv`, toCsv([headers, ...rows]), "text/csv");
+  };
+
+  const exportResultsPdf = () => {
+    window.print();
   };
 
   const importFile = async (file: File) => {
@@ -784,7 +784,7 @@ function App() {
       if (extension === "json") {
         const parsed = JSON.parse(text);
         const importedModel = isDecisionModel(parsed) ? parsed : isDecisionModel(parsed?.model) ? parsed.model : undefined;
-        if (!importedModel) throw new Error("JSON nao contem um modelo MAVT valido.");
+        if (!importedModel) throw new Error("JSON não contém um modelo MAVT válido.");
         commit(() => sanitizeDecisionModel(importedModel));
         setSelectedId(ROOT_ID);
         setInspectorOpen(false);
@@ -805,7 +805,7 @@ function App() {
 
       throw new Error("Use um arquivo .json, .csv ou .tsv.");
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Nao consegui importar o arquivo.";
+      const message = error instanceof Error ? error.message : "Não consegui importar o arquivo.";
       setNotice(message);
       window.alert(message);
     }
@@ -833,7 +833,7 @@ function App() {
         ...items,
         {
           role: "assistant",
-          text: `${response} Usei o agente local porque a IA real nao respondeu: ${detail}`,
+          text: `${response} Usei o agente local porque a IA real não respondeu: ${detail}`,
         },
       ]);
     } finally {
@@ -871,7 +871,7 @@ function App() {
             </div>
             <div>
               <h1>MAVT Workspace</h1>
-              <p>Decisao multicriterio em uma area de trabalho limpa</p>
+              <p>Decisão multicritério em uma área de trabalho limpa</p>
             </div>
           </div>
 
@@ -985,7 +985,7 @@ function App() {
 
         <main className={`workspace ${chatOpen ? "with-chat" : ""}`}>
           <section className="tree-workspace">
-            <div className="panel-heading">
+            <div className="panel-heading tree-title-heading">
               <input
                 className="root-title-input"
                 value={model.rootName}
@@ -1076,7 +1076,7 @@ function App() {
         </main>
 
         {activeModal === "results" && (
-          <Modal title="Resultados da decisao" size="large" onClose={() => setActiveModal(null)}>
+          <Modal title="Resultados da decisão" size="large" onClose={() => setActiveModal(null)}>
             <div className="results-window">
               <ResultsPanel
                 results={results}
@@ -1085,6 +1085,7 @@ function App() {
                 sensitivityLeafId={sensitivityLeafId}
                 onSensitivityChange={setSensitivityLeafId}
                 alternatives={model.alternatives}
+                onExportPdf={exportResultsPdf}
               />
             </div>
           </Modal>
@@ -1092,7 +1093,7 @@ function App() {
 
         {inspectorOpen && (
           <Modal
-            title={selectedId === ROOT_ID ? "Editar pesos principais" : `Editar ${selectedCriterion?.name ?? "criterio"}`}
+            title={selectedId === ROOT_ID ? "Editar pesos principais" : `Editar ${selectedCriterion?.name ?? "critério"}`}
             size="compact"
             onClose={() => setInspectorOpen(false)}
           >
@@ -1109,10 +1110,6 @@ function App() {
               onSiblingWeightChange={updateSiblingWeight}
               onDelete={deleteSelected}
               onAddChild={() => {
-                if (selectedId !== ROOT_ID && selectedCriterion && isLeaf(selectedCriterion)) {
-                  const confirmed = window.confirm("Ao adicionar subcriterios, esta folha deixa de ser curva de valor.");
-                  if (!confirmed) return;
-                }
                 selectedId === ROOT_ID ? addRootCriterion() : addChildCriterion(selectedId);
               }}
               onConvertToLeaf={convertSelectedToLeaf}
@@ -1234,7 +1231,7 @@ function parseDelimited(text: string, delimiter: string) {
 
 function importMatrixTable(text: string, delimiter: string, current: DecisionModel): DecisionModel {
   const rows = parseDelimited(text, delimiter);
-  if (rows.length < 2) throw new Error("A planilha precisa ter cabecalho e pelo menos uma alternativa.");
+  if (rows.length < 2) throw new Error("A planilha precisa ter cabeçalho e pelo menos uma alternativa.");
   const headers = rows[0].map((header) => header.trim()).filter(Boolean);
   if (headers.length < 2 || normalizeText(headers[0]) !== "alternativa") {
     throw new Error('A primeira coluna da planilha deve ser "Alternativa".');
@@ -1272,7 +1269,7 @@ function isDecisionModel(value: unknown): value is DecisionModel {
 
 function sanitizeDecisionModel(model: DecisionModel): DecisionModel {
   return {
-    rootName: model.rootName || "Decisao",
+    rootName: model.rootName || "Decisão",
     alternatives: model.alternatives.map((alternative) => ({
       id: alternative.id || uid("alt"),
       name: alternative.name || "Alternativa",
@@ -1287,7 +1284,7 @@ function sanitizeCriteria(criteria: Criterion[]): Criterion[] {
     return {
       ...criterion,
       id: criterion.id || uid("crit"),
-      name: criterion.name || "Criterio",
+      name: criterion.name || "Critério",
       weight: Number.isFinite(criterion.weight) ? criterion.weight : 100,
       children,
     };
@@ -1514,7 +1511,7 @@ function interpretCommand(
       : "Atualizei o modelo com as instrucoes que consegui interpretar.";
   }
 
-  return "Ainda nao consegui transformar esse texto em alteracoes. Tente citar alternativas, criterios, pesos, subcriterios ou uma curva de valor.";
+  return "Ainda não consegui transformar esse texto em alterações. Tente citar alternativas, critérios, pesos, subcritérios ou uma curva de valor.";
 }
 
 function applyAssistantClause(
@@ -1533,7 +1530,7 @@ function applyAssistantClause(
   if (addSubcriteriaMatch) {
     const names = parseNameList(addSubcriteriaMatch[1]);
     const parent = findCriterionByName(model.criteria, addSubcriteriaMatch[2]);
-    if (!parent) return { model, reply: "Nao encontrei o criterio que receberia esses subcriterios." };
+    if (!parent) return { model, reply: "Não encontrei o critério que receberia esses subcritérios." };
     const children = names.map((name, index) => createCriterion(name, 100 / Math.max(1, names.length), model.alternatives));
     const next = {
       ...model,
@@ -1546,7 +1543,7 @@ function applyAssistantClause(
     };
     return {
       model: next,
-      reply: `Adicionei ${names.length} subcriterio${names.length === 1 ? "" : "s"} em ${parent.name}.`,
+      reply: `Adicionei ${names.length} subcritério${names.length === 1 ? "" : "s"} em ${parent.name}.`,
       selectedId: parent.id,
     };
   }
@@ -1584,16 +1581,16 @@ function applyAssistantClause(
   const removeCriterionMatch = text.match(/(?:remova|apague|exclua|delete)\s+(?:o\s+)?criterio\s+(.+)/);
   if (removeCriterionMatch) {
     const criterion = findCriterionByName(model.criteria, removeTrailingCommand(removeCriterionMatch[1]));
-    if (!criterion) return { model, reply: "Nao encontrei esse criterio. Tente usar o nome exibido no no." };
+    if (!criterion) return { model, reply: "Não encontrei esse critério. Tente usar o nome exibido no nó." };
     const parent = findParent(model.criteria, criterion.id);
     const canRemove = parent ? (parent.children?.length ?? 0) > 2 : model.criteria.length > 2;
     if (!canRemove) {
       setNotice("Remocao bloqueada: o pai ficaria com apenas um filho.");
-      return { model, reply: "Nao removi esse criterio porque um no nao pode ficar com apenas um filho." };
+      return { model, reply: "Não removi esse critério porque um nó não pode ficar com apenas um filho." };
     }
     return {
       model: { ...model, criteria: normalizeTreeAfterRemoval(removeCriterion(model.criteria, criterion.id)) },
-      reply: `Removi o criterio ${criterion.name} e normalizei os pesos restantes.`,
+      reply: `Removi o critério ${criterion.name} e normalizei os pesos restantes.`,
       selectedId: parent?.id ?? ROOT_ID,
     };
   }
@@ -1617,7 +1614,7 @@ function applyAssistantClause(
     );
     return {
       model: { ...model, criteria: nextCriteria },
-      reply: `Criei ${criteria.map((item) => item.name).join(", ")} como criterio${criteria.length === 1 ? "" : "s"} raiz.`,
+      reply: `Criei ${criteria.map((item) => item.name).join(", ")} como critério${criteria.length === 1 ? "" : "s"} raiz.`,
       selectedId: criteria[0]?.id,
     };
   }
@@ -1627,7 +1624,7 @@ function applyAssistantClause(
   );
   if (weightMatch) {
     const criterion = findCriterionByName(model.criteria, weightMatch[1]);
-    if (!criterion) return { model, reply: "Nao encontrei esse criterio para alterar o peso." };
+    if (!criterion) return { model, reply: "Não encontrei esse critério para alterar o peso." };
     const weight = Number(weightMatch[2].replace(",", "."));
     const parent = findParent(model.criteria, criterion.id);
     const next = !parent
@@ -1651,7 +1648,7 @@ function applyAssistantClause(
   );
   if (scaleMatch) {
     const criterion = findCriterionByName(model.criteria, scaleMatch[1]);
-    if (!criterion || !isLeaf(criterion)) return { model, reply: "Nao encontrei uma folha compativel para configurar a curva." };
+    if (!criterion || !isLeaf(criterion)) return { model, reply: "Não encontrei uma folha compatível para configurar a curva." };
     const min = Number(scaleMatch[2].replace(",", "."));
     const max = Number(scaleMatch[3].replace(",", "."));
     const tail = scaleMatch[4];
@@ -1705,7 +1702,7 @@ function interpretStructuredDescription(rawText: string, model: DecisionModel) {
     if (weightedItems.length > 0) {
       const criteria = weightedItems.map((item) => createCriterion(item.name, item.weight ?? 100 / weightedItems.length, draft.alternatives));
       draft = { ...draft, criteria: normalizeSiblings(criteria) };
-      replies.push(`Montei os criterios principais: ${criteria.map((item) => item.name).join(", ")}.`);
+      replies.push(`Montei os critérios principais: ${criteria.map((item) => item.name).join(", ")}.`);
     }
   }
 
@@ -1732,7 +1729,7 @@ function parseSubcriteriaDescriptions(rawText: string, model: DecisionModel) {
       const names = parseNameList(match[2]);
       if (!parent || names.length === 0) continue;
       draft = addSubcriteriaToModel(draft, parent.id, names);
-      replies.push(`Adicionei subcriterios em ${parent.name}: ${names.join(", ")}.`);
+      replies.push(`Adicionei subcritérios em ${parent.name}: ${names.join(", ")}.`);
     }
   }
 
@@ -1742,7 +1739,7 @@ function parseSubcriteriaDescriptions(rawText: string, model: DecisionModel) {
     const names = parseNameList(global[1]);
     if (names.length > 0) {
       draft = addSubcriteriaToModel(draft, parent.id, names);
-      replies.push(`Adicionei subcriterios em ${parent.name}: ${names.join(", ")}.`);
+      replies.push(`Adicionei subcritérios em ${parent.name}: ${names.join(", ")}.`);
     }
   }
 
@@ -1986,14 +1983,7 @@ function CriterionInspector({
                 value={child.weight}
                 onChange={(event) => onSiblingWeightChange(child.id, Number(event.target.value))}
               />
-              <input
-                type="number"
-                min="0"
-                max="100"
-                step="0.01"
-                value={displayWeight(child.weight)}
-                onChange={(event) => onSiblingWeightChange(child.id, Number(event.target.value))}
-              />
+              <WeightInput value={child.weight} onChange={(value) => onSiblingWeightChange(child.id, value)} />
             </div>
           ))}
 
@@ -2275,7 +2265,7 @@ function CriterionInspector({
                       }))
                     }
                     disabled={qualitativeOptions.length <= 2}
-                    aria-label="Remover opcao"
+                    aria-label="Remover opção"
                   >
                     <Trash2 size={16} />
                   </button>
@@ -2290,14 +2280,14 @@ function CriterionInspector({
                       mode: "qualitative",
                       qualitativeOptions: [
                         ...qualitativeOptions,
-                        { id: uid("qual"), label: "Nova opcao", score: 50 },
+                        { id: uid("qual"), label: "Nova opção", score: 50 },
                       ],
                     },
                   }))
                 }
               >
                 <Plus size={16} />
-                Opcao qualitativa
+                Opção qualitativa
               </button>
             </div>
           )}
@@ -2337,16 +2327,44 @@ function CriterionInspector({
           {leaf && (
             <button onClick={onAddChild}>
               <Plus size={16} />
-              Adicionar subcriterios
+              Adicionar subcritérios
             </button>
           )}
           <button className="danger" onClick={onDelete} disabled={!canDelete}>
             <Trash2 size={16} />
-            Remover no
+            Remover nó
           </button>
         </div>
       )}
     </div>
+  );
+}
+
+function WeightInput({ value, onChange }: { value: number; onChange: (value: number) => void }) {
+  const [draft, setDraft] = useState(formatWeight(value));
+  const [focused, setFocused] = useState(false);
+
+  useEffect(() => {
+    if (!focused) setDraft(formatWeight(value));
+  }, [focused, value]);
+
+  return (
+    <input
+      type="text"
+      inputMode="decimal"
+      value={draft}
+      onFocus={() => setFocused(true)}
+      onBlur={() => {
+        setFocused(false);
+        setDraft(formatWeight(value));
+      }}
+      onChange={(event) => {
+        const next = event.target.value;
+        setDraft(next);
+        const parsed = parseDecimalInput(next);
+        if (parsed !== undefined) onChange(parsed);
+      }}
+    />
   );
 }
 
@@ -2357,6 +2375,7 @@ function ResultsPanel({
   sensitivityLeafId,
   onSensitivityChange,
   alternatives,
+  onExportPdf,
 }: {
   results: ReturnType<typeof calculateResults>;
   leaves: Array<{ criterion: Criterion; weight: number }>;
@@ -2364,6 +2383,7 @@ function ResultsPanel({
   sensitivityLeafId: string;
   onSensitivityChange: (id: string) => void;
   alternatives: Alternative[];
+  onExportPdf: () => void;
 }) {
   const stackedData = results.map((result) => ({
     name: result.name,
@@ -2376,9 +2396,15 @@ function ResultsPanel({
       <div className="panel-heading flush">
         <div>
           <span className="eyebrow">Resultados</span>
-          <h2>Analise MAVT</h2>
+          <h2>Análise MAVT</h2>
         </div>
-        <BarChart3 size={22} />
+        <div className="results-actions">
+          <button onClick={onExportPdf}>
+            <Printer size={16} />
+            PDF
+          </button>
+          <BarChart3 size={22} />
+        </div>
       </div>
 
       <div className="winner-strip">
@@ -2388,7 +2414,7 @@ function ResultsPanel({
       </div>
 
       <div className="chart-card">
-        <h3>Pontuacao ponderada</h3>
+        <h3>Pontuação ponderada</h3>
         <ResponsiveContainer width="100%" height={205}>
           <BarChart data={results}>
             <CartesianGrid strokeDasharray="3 3" vertical={false} />
@@ -2396,6 +2422,7 @@ function ResultsPanel({
             <YAxis domain={[0, 100]} />
             <Tooltip formatter={(value) => formatTooltipNumber(value)} />
             <Bar dataKey="score" radius={[8, 8, 0, 0]}>
+              <LabelList dataKey="score" position="top" formatter={(value: unknown) => formatTooltipNumber(value)} />
               {results.map((entry, index) => (
                 <Cell key={entry.id} fill={colors[index % colors.length]} />
               ))}
@@ -2405,7 +2432,7 @@ function ResultsPanel({
       </div>
 
       <div className="chart-card">
-        <h3>Contribuicao por criterio</h3>
+        <h3>Contribuição por critério</h3>
         <ResponsiveContainer width="100%" height={220}>
           <BarChart data={stackedData}>
             <CartesianGrid strokeDasharray="3 3" vertical={false} />
@@ -2414,7 +2441,9 @@ function ResultsPanel({
             <Tooltip formatter={(value) => formatTooltipNumber(value)} />
             <Legend />
             {leaves.map((leaf, index) => (
-              <Bar key={leaf.criterion.id} dataKey={leaf.criterion.name} stackId="a" fill={colors[index % colors.length]} />
+              <Bar key={leaf.criterion.id} dataKey={leaf.criterion.name} stackId="a" fill={colors[index % colors.length]}>
+                <LabelList dataKey={leaf.criterion.name} position="center" formatter={(value: unknown) => formatTooltipNumber(value)} />
+              </Bar>
             ))}
           </BarChart>
         </ResponsiveContainer>
@@ -2474,7 +2503,9 @@ function ResultsPanel({
                 stroke={colors[index % colors.length]}
                 strokeWidth={2.5}
                 dot={{ r: 3 }}
-              />
+              >
+                <LabelList dataKey={alternative.name} position="top" formatter={(value: unknown) => formatTooltipNumber(value)} />
+              </Line>
             ))}
           </LineChart>
         </ResponsiveContainer>
@@ -2598,14 +2629,14 @@ function renderHelpTopic(topic: HelpTopic) {
   if (topic === "method") {
     return (
       <>
-        <h3>O que e o metodo MAVT</h3>
+        <h3>O que é o método MAVT</h3>
         <p>
-          MAVT e um metodo de apoio a decisao multicriterio. Ele compara alternativas usando criterios, pesos e
-          funcoes de valor, transformando desempenhos diferentes em uma pontuacao comum.
+          MAVT é um método de apoio à decisão multicritério. Ele compara alternativas usando critérios, pesos e
+          funções de valor, transformando desempenhos diferentes em uma pontuação comum.
         </p>
         <p>
           A ideia central e separar julgamento em partes: o que importa, quanto importa e como cada alternativa se
-          comporta em cada criterio.
+          comporta em cada critério.
         </p>
       </>
     );
@@ -2616,13 +2647,13 @@ function renderHelpTopic(topic: HelpTopic) {
       <>
         <h3>Passo a passo MAVT</h3>
         <ol>
-          <li>Defina o problema central no titulo da arvore.</li>
-          <li>Liste as alternativas que serao comparadas.</li>
-          <li>Crie criterios e subcriterios, mantendo a estrutura clara.</li>
+          <li>Defina o problema central no título da árvore.</li>
+          <li>Liste as alternativas que serão comparadas.</li>
+          <li>Crie critérios e subcritérios, mantendo a estrutura clara.</li>
           <li>Ajuste os pesos locais para representar importancia relativa.</li>
-          <li>Configure a funcao de valor de cada folha.</li>
+          <li>Configure a função de valor de cada folha.</li>
           <li>Preencha a matriz de desempenho.</li>
-          <li>Abra Resultados para comparar pontuacao, contribuicao e sensibilidade.</li>
+          <li>Abra Resultados para comparar pontuação, contribuição e sensibilidade.</li>
         </ol>
       </>
     );
@@ -2633,13 +2664,13 @@ function renderHelpTopic(topic: HelpTopic) {
       <>
         <h3>Agente MAVT</h3>
         <p>
-          O chat pode editar a decisao por linguagem natural. Ele entende comandos curtos e descricoes mais completas.
+          O chat pode editar a decisão por linguagem natural. Ele entende comandos curtos e descrições mais completas.
         </p>
         <ul>
           <li>remova a alternativa Corolla</li>
-          <li>adicione criterio risco com peso 20%</li>
+          <li>adicione critério risco com peso 20%</li>
           <li>configure preco de 0 a 200 menor melhor</li>
-          <li>as alternativas sao Alfa, Beta e Gama; os criterios sao custo, qualidade e prazo</li>
+          <li>as alternativas são Alfa, Beta e Gama; os critérios são custo, qualidade e prazo</li>
         </ul>
         <p>Use Shift+Enter para escrever mensagens longas em varias linhas.</p>
       </>
@@ -2652,10 +2683,10 @@ function renderHelpTopic(topic: HelpTopic) {
         <h3>Importar e exportar</h3>
         <p>O menu Arquivos permite salvar ou carregar dados do estudo.</p>
         <ul>
-          <li>JSON completo salva arvore, alternativas, valores e resultados calculados.</li>
+          <li>JSON completo salva árvore, alternativas, valores e resultados calculados.</li>
           <li>CSV de resultados exporta a tabela de pontuacoes.</li>
-          <li>CSV da matriz exporta alternativas e valores por criterio folha.</li>
-          <li>Importar CSV espera a primeira coluna como Alternativa e as demais como criterios.</li>
+          <li>CSV da matriz exporta alternativas e valores por critério folha.</li>
+          <li>Importar CSV espera a primeira coluna como Alternativa e as demais como critérios.</li>
         </ul>
       </>
     );
@@ -2666,12 +2697,12 @@ function renderHelpTopic(topic: HelpTopic) {
       <>
         <h3>Resultados e sensibilidade</h3>
         <p>
-          A pontuacao total combina valor normalizado e peso global de cada criterio folha. A melhor alternativa e a
-          maior pontuacao total.
+          A pontuação total combina valor normalizado e peso global de cada critério folha. A melhor alternativa é a
+          maior pontuação total.
         </p>
         <p>
-          O grafico de contribuicao mostra quais criterios explicam a pontuacao. A sensibilidade testa como o ranking
-          muda quando um criterio recebe mais ou menos peso.
+          O gráfico de contribuição mostra quais critérios explicam a pontuação. A sensibilidade testa como o ranking
+          muda quando um critério recebe mais ou menos peso.
         </p>
       </>
     );
@@ -2681,15 +2712,15 @@ function renderHelpTopic(topic: HelpTopic) {
     <>
       <h3>Como usar o software</h3>
       <p>
-        Comece editando o nome do problema na parte superior da arvore. Clique nos nos para editar nomes, pesos,
-        subcriterios, funcoes de valor e valores das alternativas.
+        Comece editando o nome do problema na parte superior da árvore. Clique nos nós para editar nomes, pesos,
+        subcritérios, funções de valor e valores das alternativas.
       </p>
       <p>
         Use os botoes Alternativa e Matriz para preencher dados manualmente. Use Resultados para abrir a analise MAVT.
         O menu Arquivos salva, exporta ou importa estudos.
       </p>
       <p>
-        Se preferir, descreva a decisao no Agente MAVT e deixe o chat montar ou ajustar a estrutura para voce.
+        Se preferir, descreva a decisão no Agente MAVT e deixe o chat montar ou ajustar a estrutura para você.
       </p>
     </>
   );

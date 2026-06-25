@@ -1,6 +1,6 @@
 # MAVT Workspace
 
-Aplicativo web interativo para tomada de decisao pelo metodo MAVT, com uma tela unica de trabalho, arvore de criterios, matriz de desempenho, painel de resultados e agente de IA por chat lateral.
+Aplicativo web interativo para tomada de decisão pelo método MAVT, com uma tela única de trabalho, árvore de critérios, matriz de desempenho, painel de resultados e agente de IA por chat lateral.
 
 ## Rodar localmente
 
@@ -17,7 +17,7 @@ http://127.0.0.1:5173
 
 ## Ativar IA real no chat
 
-O app inclui um endpoint local `/api/agent` que chama a OpenAI pelo servidor Vite. A chave nao fica no frontend.
+O app inclui um endpoint local `/api/agent` que chama a OpenAI pelo servidor Vite. A chave não fica no frontend.
 
 1. Crie um arquivo `.env` na raiz do projeto.
 2. Preencha:
@@ -63,7 +63,7 @@ Exemplos:
 ```text
 adicione alternativa SUV
 remova HB20
-adicione criterio risco peso 15%
+adicione critério risco peso 15%
 peso do preco para 35%
 defina preco de 80000 a 150000 menor melhor
 ```
