@@ -21,7 +21,7 @@ export function mavtAgentPlugin(options = {}) {
         },
     };
 }
-async function handleAgentRequest(request, response, options) {
+export async function handleAgentRequest(request, response, options) {
     if (request.method !== "POST") {
         sendJson(response, 405, { error: "Método não permitido." });
         return;
@@ -297,6 +297,12 @@ function parseJsonObject(text) {
     }
 }
 async function readJsonBody(request) {
+    if (request.body && typeof request.body === "object" && typeof request.body[Symbol.asyncIterator] !== "function") {
+        return request.body;
+    }
+    if (typeof request.body === "string") {
+        return request.body ? JSON.parse(request.body) : {};
+    }
     const decoder = new TextDecoder();
     const chunks = [];
     for await (const chunk of request) {

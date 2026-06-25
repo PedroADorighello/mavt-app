@@ -2851,7 +2851,7 @@ function renderHelpTopic(topic: HelpTopic) {
           funções de valor, transformando desempenhos diferentes em uma pontuação comum.
         </p>
         <p>
-          A ideia central e separar julgamento em partes: o que importa, quanto importa e como cada alternativa se
+          A ideia central é separar o julgamento em partes: o que importa, quanto importa e como cada alternativa se
           comporta em cada critério.
         </p>
       </>
@@ -2865,10 +2865,10 @@ function renderHelpTopic(topic: HelpTopic) {
         <ol>
           <li>Defina o problema central no título da árvore.</li>
           <li>Liste as alternativas que serão comparadas.</li>
-          <li>Crie critérios e subcritérios, mantendo a estrutura clara.</li>
-          <li>Ajuste os pesos locais para representar importancia relativa.</li>
-          <li>Configure a função de valor de cada folha.</li>
-          <li>Preencha a matriz de desempenho.</li>
+          <li>Crie critérios e subcritérios, mantendo pelo menos 2 filhos em cada critério composto.</li>
+          <li>Ajuste os pesos locais; os irmãos são redistribuídos para somar 100%.</li>
+          <li>Configure a função de valor de cada critério folha.</li>
+          <li>Preencha a matriz de desempenho para todas as alternativas.</li>
           <li>Abra Resultados para comparar pontuação, contribuição e sensibilidade.</li>
         </ol>
       </>
@@ -2880,15 +2880,20 @@ function renderHelpTopic(topic: HelpTopic) {
       <>
         <h3>Agente MAVT</h3>
         <p>
-          O chat pode editar a decisão por linguagem natural. Ele entende comandos curtos e descrições mais completas.
+          O chat pode editar a decisão por linguagem natural. Quando a IA externa falha, o app tenta aplicar comandos
+          comuns com o agente local.
         </p>
         <ul>
           <li>remova a alternativa Corolla</li>
           <li>adicione critério risco com peso 20%</li>
-          <li>configure preco de 0 a 200 menor melhor</li>
+          <li>adicione um subcritério em Qualidade chamado Design</li>
+          <li>configure preço de 0 a 200 menor melhor</li>
           <li>as alternativas são Alfa, Beta e Gama; os critérios são custo, qualidade e prazo</li>
         </ul>
-        <p>Use Shift+Enter para escrever mensagens longas em varias linhas.</p>
+        <p>
+          Se uma remoção deixaria um critério com apenas um filho, o agente pergunta antes de remover todos os
+          subcritérios do pai e transformá-lo em folha.
+        </p>
       </>
     );
   }
@@ -2897,12 +2902,12 @@ function renderHelpTopic(topic: HelpTopic) {
     return (
       <>
         <h3>Importar e exportar</h3>
-        <p>O menu Arquivos permite salvar ou carregar dados do estudo.</p>
+        <p>O menu Arquivos organiza as ações em Importar e Exportar.</p>
         <ul>
-          <li>JSON completo salva árvore, alternativas, valores e resultados calculados.</li>
-          <li>CSV de resultados exporta a tabela de pontuacoes.</li>
-          <li>CSV da matriz exporta alternativas e valores por critério folha.</li>
-          <li>Importar CSV espera a primeira coluna como Alternativa e as demais como critérios.</li>
+          <li>Importar aceita JSON completo do estudo e CSV/TSV de matriz.</li>
+          <li>Exportar JSON salva árvore, alternativas, pesos, escalas e valores de desempenho.</li>
+          <li>Exportar CSV gera um arquivo com matriz de desempenho e tabela de desempenho MAVT.</li>
+          <li>CSV/TSV importado deve ter Alternativa na primeira coluna e critérios folha nas demais.</li>
         </ul>
       </>
     );
@@ -2913,12 +2918,12 @@ function renderHelpTopic(topic: HelpTopic) {
       <>
         <h3>Resultados e sensibilidade</h3>
         <p>
-          A pontuação total combina valor normalizado e peso global de cada critério folha. A melhor alternativa é a
-          maior pontuação total.
+          A pontuação total combina o valor normalizado de cada critério folha com seu peso global. A melhor alternativa
+          é a que obtém a maior pontuação total.
         </p>
         <p>
-          O gráfico de contribuição mostra quais critérios explicam a pontuação. A sensibilidade testa como o ranking
-          muda quando um critério recebe mais ou menos peso.
+          Os gráficos mostram pontuação, contribuição por critério e sensibilidade. Ao passar o mouse sobre um gráfico,
+          os rótulos fixos somem para evitar duplicidade com a janela de valores.
         </p>
       </>
     );
@@ -2929,15 +2934,13 @@ function renderHelpTopic(topic: HelpTopic) {
       <h3>Como usar o software</h3>
       <p>
         Comece editando o nome do problema na parte superior da árvore. Clique nos nós para editar nomes, pesos,
-        subcritérios, funções de valor e valores das alternativas.
+        subcritérios, escalas de valor e valores das alternativas.
       </p>
       <p>
-        Use os botoes Alternativa e Matriz para preencher dados manualmente. Use Resultados para abrir a analise MAVT.
-        O menu Arquivos salva, exporta ou importa estudos.
+        Use Alternativa para gerenciar opções, Matriz para preencher desempenhos e Resultados para abrir a análise MAVT.
+        O menu Arquivos importa estudos ou exporta JSON completo e CSV consolidado.
       </p>
-      <p>
-        Se preferir, descreva a decisão no Agente MAVT e deixe o chat montar ou ajustar a estrutura para você.
-      </p>
+      <p>Se preferir, descreva a decisão no Agente MAVT e deixe o chat montar ou ajustar a estrutura.</p>
     </>
   );
 }

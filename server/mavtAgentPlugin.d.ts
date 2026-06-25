@@ -9,4 +9,5 @@ type MavtAgentPluginOptions = {
     timeoutMs?: number;
 };
 export declare function mavtAgentPlugin(options?: MavtAgentPluginOptions): Plugin;
+export declare function handleAgentRequest(request: any, response: any, options: MavtAgentPluginOptions): Promise<void>;
 export {};

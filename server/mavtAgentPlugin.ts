@@ -35,7 +35,7 @@ export function mavtAgentPlugin(options: MavtAgentPluginOptions = {}): Plugin {
   };
 }
 
-async function handleAgentRequest(request: any, response: any, options: MavtAgentPluginOptions) {
+export async function handleAgentRequest(request: any, response: any, options: MavtAgentPluginOptions) {
   if (request.method !== "POST") {
     sendJson(response, 405, { error: "Método não permitido." });
     return;
@@ -285,7 +285,7 @@ function compactDecisionModel(model: any) {
   return {
     rootName: model.rootName,
     alternatives: Array.isArray(model.alternatives)
-      ? model.alternatives.map((item) => ({ name: item?.name })).filter((item) => item.name)
+      ? model.alternatives.map((item: any) => ({ name: item?.name })).filter((item: { name?: string }) => item.name)
       : [],
     criteria: compactCriteria(model.criteria),
   };
@@ -312,7 +312,7 @@ function compactCriteria(criteria: any): any[] {
 
 function sanitizeAgentResult(value: any) {
   const reply = typeof value?.reply === "string" && value.reply.trim() ? value.reply.trim() : "Entendi.";
-  const operations = Array.isArray(value?.operations) ? value.operations.filter((operation) => operation?.type) : [];
+  const operations = Array.isArray(value?.operations) ? value.operations.filter((operation: any) => operation?.type) : [];
   return { reply, operations };
 }
 
@@ -349,6 +349,13 @@ function parseJsonObject(text: string) {
 }
 
 async function readJsonBody(request: any) {
+  if (request.body && typeof request.body === "object" && typeof request.body[Symbol.asyncIterator] !== "function") {
+    return request.body;
+  }
+  if (typeof request.body === "string") {
+    return request.body ? JSON.parse(request.body) : {};
+  }
+
   const decoder = new TextDecoder();
   const chunks: string[] = [];
   for await (const chunk of request) {
