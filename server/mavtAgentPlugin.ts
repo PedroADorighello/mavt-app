@@ -2,13 +2,22 @@ import type { Plugin } from "vite";
 
 type MavtAgentPluginOptions = {
   apiKey?: string;
+  apiKeys?: string[];
   baseUrl?: string;
   model?: string;
+  models?: string[];
+  maxOutputTokens?: number;
+  timeoutMs?: number;
 };
 
 const OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses";
 const OPENAI_COMPATIBLE_CHAT_URL = "https://openrouter.ai/api/v1/chat/completions";
 const DEFAULT_MODEL = "gpt-5.5";
+const DEFAULT_OPENAI_FALLBACK_MODELS = ["gpt-5.4-mini", "gpt-4.1-mini"];
+const DEFAULT_COMPATIBLE_MODEL = "openai/gpt-4o-mini";
+const DEFAULT_MAX_OUTPUT_TOKENS = 900;
+const DEFAULT_COMPATIBLE_MAX_TOKENS = 160;
+const DEFAULT_TIMEOUT_MS = 25_000;
 
 export function mavtAgentPlugin(options: MavtAgentPluginOptions = {}): Plugin {
   return {
@@ -32,8 +41,8 @@ async function handleAgentRequest(request: any, response: any, options: MavtAgen
     return;
   }
 
-  const apiKey = options.apiKey;
-  if (!apiKey) {
+  const apiKeys = uniqueValues([...(options.apiKeys ?? []), options.apiKey]);
+  if (apiKeys.length === 0) {
     sendJson(response, 401, {
       error: "OPENAI_API_KEY não configurada. Defina a chave em .env ou no ambiente antes de iniciar o app.",
     });
@@ -56,10 +65,11 @@ async function handleAgentRequest(request: any, response: any, options: MavtAgen
     model: compactDecisionModel(body?.model),
   };
 
-  const usesCompatibleChat = Boolean(options.baseUrl) || apiKey.startsWith("sk-or-");
+  const usesCompatibleChat = Boolean(options.baseUrl) || apiKeys.some((key) => key.startsWith("sk-or-"));
+  const modelCandidates = getModelCandidates(options, usesCompatibleChat);
   const aiResponse = usesCompatibleChat
-    ? await callCompatibleChat(apiKey, options, payload)
-    : await callOpenAIResponses(apiKey, options, payload);
+    ? await callWithFallbacks(apiKeys, modelCandidates, (apiKey, model) => callCompatibleChat(apiKey, model, options, payload))
+    : await callWithFallbacks(apiKeys, modelCandidates, (apiKey, model) => callOpenAIResponses(apiKey, model, options, payload));
 
   if (!aiResponse.ok) {
     sendJson(response, aiResponse.status, {
@@ -81,40 +91,82 @@ async function handleAgentRequest(request: any, response: any, options: MavtAgen
   sendJson(response, 200, sanitizeAgentResult(parsed));
 }
 
-async function callOpenAIResponses(apiKey: string, options: MavtAgentPluginOptions, payload: unknown) {
-  const response = await fetch(resolveUrl(options.baseUrl, OPENAI_RESPONSES_URL), {
+type AiCallResult = {
+  ok: boolean;
+  status: number;
+  text: string;
+  error?: string;
+};
+
+async function callWithFallbacks(
+  apiKeys: string[],
+  models: string[],
+  call: (apiKey: string, model: string) => Promise<AiCallResult>,
+): Promise<AiCallResult> {
+  let lastResult: AiCallResult | undefined;
+
+  for (const model of models) {
+    for (const apiKey of apiKeys) {
+      const result = await call(apiKey, model);
+      if (result.ok) return result;
+      lastResult = result;
+      if (!shouldTryFallback(result.status)) return result;
+    }
+  }
+
+  return lastResult ?? { ok: false, status: 502, text: "", error: "Nenhum provedor de IA respondeu." };
+}
+
+async function callOpenAIResponses(
+  apiKey: string,
+  model: string,
+  options: MavtAgentPluginOptions,
+  payload: unknown,
+): Promise<AiCallResult> {
+  const body: Record<string, unknown> = {
+    model,
+    max_output_tokens: normalizedMaxOutputTokens(options.maxOutputTokens, DEFAULT_MAX_OUTPUT_TOKENS),
+    input: [
+      {
+        role: "developer",
+        content: buildSystemPrompt(),
+      },
+      {
+        role: "user",
+        content: JSON.stringify(payload),
+      },
+    ],
+  };
+  if (model.startsWith("gpt-5")) {
+    body.reasoning = { effort: "low" };
+    body.text = { verbosity: "low" };
+  }
+
+  const response = await fetchWithTimeout(resolveUrl(options.baseUrl, OPENAI_RESPONSES_URL), {
     method: "POST",
     headers: {
       Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({
-      model: options.model || DEFAULT_MODEL,
-      max_output_tokens: 220,
-      input: [
-        {
-          role: "developer",
-          content: buildSystemPrompt(),
-        },
-        {
-          role: "user",
-          content: JSON.stringify(payload),
-        },
-      ],
-    }),
-  });
+    body: JSON.stringify(body),
+  }, options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
 
   const data = await response.json().catch(() => undefined);
   return {
     ok: response.ok,
     status: response.status,
     text: extractResponsesText(data),
-    error: data?.error?.message,
+    error: formatAiError(data?.error?.message, response.status, model),
   };
 }
 
-async function callCompatibleChat(apiKey: string, options: MavtAgentPluginOptions, payload: unknown) {
-  const response = await fetch(resolveUrl(options.baseUrl, OPENAI_COMPATIBLE_CHAT_URL), {
+async function callCompatibleChat(
+  apiKey: string,
+  model: string,
+  options: MavtAgentPluginOptions,
+  payload: unknown,
+): Promise<AiCallResult> {
+  const response = await fetchWithTimeout(resolveUrl(options.baseUrl, OPENAI_COMPATIBLE_CHAT_URL), {
     method: "POST",
     headers: {
       Authorization: `Bearer ${apiKey}`,
@@ -123,8 +175,8 @@ async function callCompatibleChat(apiKey: string, options: MavtAgentPluginOption
       "X-Title": "MAVT Workspace",
     },
     body: JSON.stringify({
-      model: options.model || "openai/gpt-4o-mini",
-      max_tokens: 220,
+      model,
+      max_tokens: normalizedMaxOutputTokens(options.maxOutputTokens, DEFAULT_COMPATIBLE_MAX_TOKENS, DEFAULT_COMPATIBLE_MAX_TOKENS),
       messages: [
         {
           role: "system",
@@ -137,14 +189,14 @@ async function callCompatibleChat(apiKey: string, options: MavtAgentPluginOption
       ],
       response_format: { type: "json_object" },
     }),
-  });
+  }, options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
 
   const data = await response.json().catch(() => undefined);
   return {
     ok: response.ok,
     status: response.status,
     text: data?.choices?.[0]?.message?.content ?? "",
-    error: data?.error?.message,
+    error: formatAiError(data?.error?.message, response.status, model),
   };
 }
 
@@ -172,8 +224,60 @@ function buildSystemPrompt() {
     "Use setPerformance quando o usuário informar valores de alternativas na matriz de desempenho.",
     "Use replaceCriteria, não addCriteria, quando o usuário disser que os critérios são, serão, ou descrever o problema inteiro.",
     "Use replaceAlternatives quando o usuário disser que as alternativas são ou descrever o problema inteiro.",
+    "Para pedidos compostos, retorne uma operação para cada mudança solicitada, preservando a ordem do usuário.",
+    "Use removeCriteria também para remover subcritérios pelo nome.",
     "Se o pedido for ambíguo, retorne operations vazia e explique a dúvida no reply.",
   ].join("\n");
+}
+
+function getModelCandidates(options: MavtAgentPluginOptions, usesCompatibleChat: boolean) {
+  const explicitList = uniqueValues(options.models ?? []);
+  if (explicitList.length > 0) return explicitList;
+  const primary = options.model || (usesCompatibleChat ? DEFAULT_COMPATIBLE_MODEL : DEFAULT_MODEL);
+  return usesCompatibleChat ? [primary] : uniqueValues([primary, ...DEFAULT_OPENAI_FALLBACK_MODELS]);
+}
+
+function uniqueValues(values: Array<string | undefined>) {
+  const seen = new Set<string>();
+  return values
+    .map((value) => value?.trim())
+    .filter((value): value is string => Boolean(value))
+    .filter((value) => {
+      if (seen.has(value)) return false;
+      seen.add(value);
+      return true;
+    });
+}
+
+function shouldTryFallback(status: number) {
+  return status === 0 || status === 400 || status === 401 || status === 403 || status === 408 || status === 409 || status === 429 || status >= 500;
+}
+
+function normalizedMaxOutputTokens(value: number | undefined, fallback: number, ceiling = 4000) {
+  return Number.isFinite(value) ? Math.max(80, Math.min(ceiling, Number(value))) : fallback;
+}
+
+function formatAiError(message: string | undefined, status: number, model: string) {
+  const detail = message?.trim() || "Falha ao chamar a IA.";
+  return `${detail} (HTTP ${status}, modelo ${model})`;
+}
+
+async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      return new Response(JSON.stringify({ error: { message: "Tempo limite ao chamar a IA." } }), { status: 408 });
+    }
+    return new Response(
+      JSON.stringify({ error: { message: error instanceof Error ? error.message : "Erro de rede ao chamar a IA." } }),
+      { status: 502 },
+    );
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 function compactDecisionModel(model: any) {

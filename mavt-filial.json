@@ -1,0 +1,364 @@
+{
+  "version": 1,
+  "exportedAt": "2026-06-25T15:17:04.759Z",
+  "model": {
+    "rootName": "Filial",
+    "alternatives": [
+      {
+        "id": "alt-cas-rua",
+        "name": "Castanha - Rua"
+      },
+      {
+        "id": "alt-temp-rua",
+        "name": "Tempero - Rua"
+      },
+      {
+        "id": "alt-cas-shopp",
+        "name": "Castanha - Shopping"
+      },
+      {
+        "id": "alt-temp-shopp",
+        "name": "Tempero - Shopping"
+      }
+    ],
+    "criteria": [
+      {
+        "id": "crit-financeiro",
+        "name": "Financeiro",
+        "weight": 50.00298692197389,
+        "children": [
+          {
+            "id": "crit-vme",
+            "name": "VME",
+            "weight": 70,
+            "scale": {
+              "mode": "quantitative",
+              "autoBounds": false,
+              "min": 1422,
+              "max": 3687,
+              "direction": "benefit"
+            },
+            "performances": {
+              "alt-cas-rua": 3687,
+              "alt-temp-rua": 1448,
+              "alt-cas-shopp": 2518,
+              "alt-temp-shopp": 1422
+            }
+          },
+          {
+            "id": "crit-custo-fixo-aluguel",
+            "name": "Custo Fixo (Aluguel)",
+            "weight": 30,
+            "scale": {
+              "mode": "quantitative",
+              "autoBounds": false,
+              "min": 3500,
+              "max": 10000,
+              "direction": "cost"
+            },
+            "performances": {
+              "alt-cas-rua": 3500,
+              "alt-temp-rua": 3500,
+              "alt-cas-shopp": 10000,
+              "alt-temp-shopp": 10000
+            }
+          }
+        ]
+      },
+      {
+        "id": "crit-riscos",
+        "name": "Riscos",
+        "weight": 29.997013078026114,
+        "children": [
+          {
+            "id": "crit-perecibilidade",
+            "name": "Perecibilidade",
+            "weight": 60,
+            "scale": {
+              "mode": "quantitative",
+              "autoBounds": false,
+              "min": 90,
+              "max": 365,
+              "direction": "benefit"
+            },
+            "performances": {
+              "alt-cas-rua": 90,
+              "alt-temp-rua": 365,
+              "alt-cas-shopp": 90,
+              "alt-temp-shopp": 365
+            }
+          },
+          {
+            "id": "crit-ociosidade",
+            "name": "Ociosidade",
+            "weight": 40,
+            "scale": {
+              "mode": "quantitative",
+              "autoBounds": false,
+              "min": 25.9,
+              "max": 75.6,
+              "direction": "cost"
+            },
+            "performances": {
+              "alt-cas-rua": 26,
+              "alt-temp-rua": 76,
+              "alt-cas-shopp": 28,
+              "alt-temp-shopp": 74
+            }
+          }
+        ]
+      },
+      {
+        "id": "crit-estrategico",
+        "name": "Estratégico",
+        "weight": 20,
+        "children": [
+          {
+            "id": "crit-visibilidade-marca",
+            "name": "Visibilidade (Marca)",
+            "weight": 40,
+            "scale": {
+              "mode": "qualitative",
+              "autoBounds": false,
+              "min": 0,
+              "max": 100,
+              "direction": "benefit",
+              "qualitativeOptions": [
+                {
+                  "id": "vis-baixo",
+                  "label": "Baixo",
+                  "score": 0
+                },
+                {
+                  "id": "vis-medio",
+                  "label": "Médio",
+                  "score": 50
+                },
+                {
+                  "id": "vis-alto",
+                  "label": "Alto",
+                  "score": 100
+                }
+              ]
+            },
+            "performances": {
+              "alt-cas-rua": "vis-baixo",
+              "alt-temp-rua": "vis-baixo",
+              "alt-cas-shopp": "vis-alto",
+              "alt-temp-shopp": "vis-alto"
+            }
+          },
+          {
+            "id": "crit-concorrencia",
+            "name": "Concorrência",
+            "weight": 60,
+            "scale": {
+              "mode": "qualitative",
+              "autoBounds": false,
+              "min": 0,
+              "max": 100,
+              "direction": "benefit",
+              "qualitativeOptions": [
+                {
+                  "id": "conc-alto",
+                  "label": "Alto",
+                  "score": 0
+                },
+                {
+                  "id": "conc-medio",
+                  "label": "Médio",
+                  "score": 50
+                },
+                {
+                  "id": "conc-baixo",
+                  "label": "Baixo",
+                  "score": 100
+                }
+              ]
+            },
+            "performances": {
+              "alt-cas-rua": "conc-alto",
+              "alt-temp-rua": "conc-alto",
+              "alt-cas-shopp": "conc-baixo",
+              "alt-temp-shopp": "conc-baixo"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "results": [
+    {
+      "id": "alt-cas-rua",
+      "name": "Castanha - Rua",
+      "score": 61.97764968793039,
+      "contributions": [
+        {
+          "id": "crit-vme",
+          "name": "VME",
+          "value": 35.00209084538172,
+          "weight": 0.3500209084538172
+        },
+        {
+          "id": "crit-custo-fixo-aluguel",
+          "name": "Custo Fixo (Aluguel)",
+          "value": 15.000896076592166,
+          "weight": 0.15000896076592166
+        },
+        {
+          "id": "crit-perecibilidade",
+          "name": "Perecibilidade",
+          "value": 0,
+          "weight": 0.17998207846815667
+        },
+        {
+          "id": "crit-ociosidade",
+          "name": "Ociosidade",
+          "value": 11.974662765956502,
+          "weight": 0.11998805231210447
+        },
+        {
+          "id": "crit-visibilidade-marca",
+          "name": "Visibilidade (Marca)",
+          "value": 0,
+          "weight": 0.08000000000000002
+        },
+        {
+          "id": "crit-concorrencia",
+          "name": "Concorrência",
+          "value": 0,
+          "weight": 0.12
+        }
+      ]
+    },
+    {
+      "id": "alt-cas-shopp",
+      "name": "Castanha - Shopping",
+      "score": 48.42880752998947,
+      "contributions": [
+        {
+          "id": "crit-vme",
+          "name": "VME",
+          "value": 16.93699406911186,
+          "weight": 0.3500209084538172
+        },
+        {
+          "id": "crit-custo-fixo-aluguel",
+          "name": "Custo Fixo (Aluguel)",
+          "value": 0,
+          "weight": 0.15000896076592166
+        },
+        {
+          "id": "crit-perecibilidade",
+          "name": "Perecibilidade",
+          "value": 0,
+          "weight": 0.17998207846815667
+        },
+        {
+          "id": "crit-ociosidade",
+          "name": "Ociosidade",
+          "value": 11.49181346087761,
+          "weight": 0.11998805231210447
+        },
+        {
+          "id": "crit-visibilidade-marca",
+          "name": "Visibilidade (Marca)",
+          "value": 8.000000000000002,
+          "weight": 0.08000000000000002
+        },
+        {
+          "id": "crit-concorrencia",
+          "name": "Concorrência",
+          "value": 12,
+          "weight": 0.12
+        }
+      ]
+    },
+    {
+      "id": "alt-temp-shopp",
+      "name": "Tempero - Shopping",
+      "score": 38.38448729087878,
+      "contributions": [
+        {
+          "id": "crit-vme",
+          "name": "VME",
+          "value": 0,
+          "weight": 0.3500209084538172
+        },
+        {
+          "id": "crit-custo-fixo-aluguel",
+          "name": "Custo Fixo (Aluguel)",
+          "value": 0,
+          "weight": 0.15000896076592166
+        },
+        {
+          "id": "crit-perecibilidade",
+          "name": "Perecibilidade",
+          "value": 17.998207846815667,
+          "weight": 0.17998207846815667
+        },
+        {
+          "id": "crit-ociosidade",
+          "name": "Ociosidade",
+          "value": 0.3862794440631115,
+          "weight": 0.11998805231210447
+        },
+        {
+          "id": "crit-visibilidade-marca",
+          "name": "Visibilidade (Marca)",
+          "value": 8.000000000000002,
+          "weight": 0.08000000000000002
+        },
+        {
+          "id": "crit-concorrencia",
+          "name": "Concorrência",
+          "value": 12,
+          "weight": 0.12
+        }
+      ]
+    },
+    {
+      "id": "alt-temp-rua",
+      "name": "Tempero - Rua",
+      "score": 33.40089392869699,
+      "contributions": [
+        {
+          "id": "crit-vme",
+          "name": "VME",
+          "value": 0.40179000528915,
+          "weight": 0.3500209084538172
+        },
+        {
+          "id": "crit-custo-fixo-aluguel",
+          "name": "Custo Fixo (Aluguel)",
+          "value": 15.000896076592166,
+          "weight": 0.15000896076592166
+        },
+        {
+          "id": "crit-perecibilidade",
+          "name": "Perecibilidade",
+          "value": 17.998207846815667,
+          "weight": 0.17998207846815667
+        },
+        {
+          "id": "crit-ociosidade",
+          "name": "Ociosidade",
+          "value": 0,
+          "weight": 0.11998805231210447
+        },
+        {
+          "id": "crit-visibilidade-marca",
+          "name": "Visibilidade (Marca)",
+          "value": 0,
+          "weight": 0.08000000000000002
+        },
+        {
+          "id": "crit-concorrencia",
+          "name": "Concorrência",
+          "value": 0,
+          "weight": 0.12
+        }
+      ]
+    }
+  ]
+}

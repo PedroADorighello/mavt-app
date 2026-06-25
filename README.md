@@ -25,11 +25,24 @@ O app inclui um endpoint local `/api/agent` que chama a OpenAI pelo servidor Vit
 ```text
 OPENAI_API_KEY=sua_chave_aqui
 MAVT_OPENAI_MODEL=gpt-5.5
+MAVT_AGENT_MAX_OUTPUT_TOKENS=160
+MAVT_AGENT_TIMEOUT_MS=25000
 ```
 
 3. Reinicie o `npm run dev`.
 
 Sem `OPENAI_API_KEY`, o chat continua funcionando com o agente local por regras.
+
+Fallbacks opcionais:
+
+```text
+OPENAI_API_KEYS=chave_principal,chave_reserva
+MAVT_OPENAI_MODELS=gpt-5.5,gpt-5.4-mini,gpt-4.1-mini
+```
+
+Chaves de fallback ajudam em casos de limite, quota, indisponibilidade temporaria ou acesso diferente entre projetos. Elas nao corrigem erro de prompt, JSON invalido ou uma configuracao errada que afete todas as chaves.
+
+Com chaves gratuitas, mantenha `MAVT_AGENT_MAX_OUTPUT_TOKENS` baixo. Para provedores compativeis/OpenRouter, o app limita a chamada a 160 tokens para evitar erro de creditos insuficientes.
 
 ## Gerar build de producao
 

@@ -1,0 +1,225 @@
+{
+  "version": 1,
+  "exportedAt": "2026-06-25T16:49:16.319Z",
+  "model": {
+    "rootName": "Carro",
+    "alternatives": [
+      {
+        "id": "alt-civic",
+        "name": "Civic"
+      },
+      {
+        "id": "alt-corolla",
+        "name": "Corolla"
+      },
+      {
+        "id": "alt-hb20",
+        "name": "HB20"
+      }
+    ],
+    "criteria": [
+      {
+        "id": "crit-custo",
+        "name": "Custo",
+        "weight": 35,
+        "children": [
+          {
+            "id": "crit-preco",
+            "name": "Preço",
+            "weight": 75,
+            "scale": {
+              "min": 80000,
+              "max": 150000,
+              "direction": "cost"
+            },
+            "performances": {
+              "alt-civic": 145000,
+              "alt-corolla": 142000,
+              "alt-hb20": 88000
+            }
+          },
+          {
+            "id": "crit-manutencao",
+            "name": "Manutenção",
+            "weight": 25,
+            "scale": {
+              "min": 2500,
+              "max": 9000,
+              "direction": "cost"
+            },
+            "performances": {
+              "alt-civic": 7400,
+              "alt-corolla": 6900,
+              "alt-hb20": 3900
+            }
+          }
+        ]
+      },
+      {
+        "id": "crit-qualidade",
+        "name": "Qualidade",
+        "weight": 40,
+        "children": [
+          {
+            "id": "crit-seguranca",
+            "name": "Segurança",
+            "weight": 55,
+            "scale": {
+              "min": 0,
+              "max": 10,
+              "direction": "benefit"
+            },
+            "performances": {
+              "alt-civic": 9.2,
+              "alt-corolla": 9,
+              "alt-hb20": 7.4
+            }
+          },
+          {
+            "id": "crit-conforto",
+            "name": "Conforto",
+            "weight": 45,
+            "scale": {
+              "min": 0,
+              "max": 10,
+              "direction": "benefit"
+            },
+            "performances": {
+              "alt-civic": 8.8,
+              "alt-corolla": 8.5,
+              "alt-hb20": 6.8
+            }
+          }
+        ]
+      },
+      {
+        "id": "crit-sustentabilidade",
+        "name": "Sustentabilidade",
+        "weight": 25,
+        "scale": {
+          "min": 0,
+          "max": 10,
+          "direction": "benefit"
+        },
+        "performances": {
+          "alt-civic": 7.8,
+          "alt-corolla": 8.6,
+          "alt-hb20": 7
+        }
+      }
+    ]
+  },
+  "results": [
+    {
+      "id": "alt-corolla",
+      "name": "Corolla",
+      "score": 62.48713450292398,
+      "contributions": [
+        {
+          "id": "crit-preco",
+          "name": "Preço",
+          "value": 1.3815789473684221,
+          "weight": 0.26249999999999996
+        },
+        {
+          "id": "crit-manutencao",
+          "name": "Manutenção",
+          "value": 1.2500000000000004,
+          "weight": 0.0875
+        },
+        {
+          "id": "crit-seguranca",
+          "name": "Segurança",
+          "value": 19.555555555555564,
+          "weight": 0.22000000000000003
+        },
+        {
+          "id": "crit-conforto",
+          "name": "Conforto",
+          "value": 15.299999999999997,
+          "weight": 0.18000000000000002
+        },
+        {
+          "id": "crit-sustentabilidade",
+          "name": "Sustentabilidade",
+          "value": 25,
+          "weight": 0.25
+        }
+      ]
+    },
+    {
+      "id": "alt-civic",
+      "name": "Civic",
+      "score": 52.50000000000001,
+      "contributions": [
+        {
+          "id": "crit-preco",
+          "name": "Preço",
+          "value": 0,
+          "weight": 0.26249999999999996
+        },
+        {
+          "id": "crit-manutencao",
+          "name": "Manutenção",
+          "value": 0,
+          "weight": 0.0875
+        },
+        {
+          "id": "crit-seguranca",
+          "name": "Segurança",
+          "value": 22.000000000000004,
+          "weight": 0.22000000000000003
+        },
+        {
+          "id": "crit-conforto",
+          "name": "Conforto",
+          "value": 18.000000000000004,
+          "weight": 0.18000000000000002
+        },
+        {
+          "id": "crit-sustentabilidade",
+          "name": "Sustentabilidade",
+          "value": 12.5,
+          "weight": 0.25
+        }
+      ]
+    },
+    {
+      "id": "alt-hb20",
+      "name": "HB20",
+      "score": 35,
+      "contributions": [
+        {
+          "id": "crit-preco",
+          "name": "Preço",
+          "value": 26.249999999999996,
+          "weight": 0.26249999999999996
+        },
+        {
+          "id": "crit-manutencao",
+          "name": "Manutenção",
+          "value": 8.75,
+          "weight": 0.0875
+        },
+        {
+          "id": "crit-seguranca",
+          "name": "Segurança",
+          "value": 0,
+          "weight": 0.22000000000000003
+        },
+        {
+          "id": "crit-conforto",
+          "name": "Conforto",
+          "value": 0,
+          "weight": 0.18000000000000002
+        },
+        {
+          "id": "crit-sustentabilidade",
+          "name": "Sustentabilidade",
+          "value": 0,
+          "weight": 0.25
+        }
+      ]
+    }
+  ]
+}

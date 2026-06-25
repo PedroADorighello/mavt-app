@@ -250,6 +250,10 @@ p {
   background: #f4f8f7;
 }
 
+.file-menu-popover .menu-back-button {
+  color: #58707a;
+}
+
 .help-menu-popover {
   min-width: 250px;
 }
@@ -486,6 +490,19 @@ p {
   transform: translateY(-1px);
 }
 
+.criterion-node.root {
+  background: #24586a;
+  border-color: #123241;
+  color: #f8fbfc;
+  box-shadow: 0 8px 18px rgba(36, 88, 106, 0.22);
+}
+
+.criterion-node.root.selected {
+  background: #1b4658;
+  border-color: #0f2c39;
+  box-shadow: 0 12px 22px rgba(27, 70, 88, 0.28);
+}
+
 .criterion-node.leaf {
   background: #dff3e7;
   border-color: #2f8f64;
@@ -676,6 +693,17 @@ p {
 .danger {
   border-color: #edc6c1;
   color: #a6423a;
+}
+
+.structure-action {
+  background: #eef8fb;
+  border-color: #abd7e1;
+  color: #246a7a;
+}
+
+.structure-action:hover:not(:disabled) {
+  background: #dff1f6;
+  border-color: #8ac6d3;
 }
 
 .danger-text {

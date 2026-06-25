@@ -19,6 +19,7 @@ import {
   Download,
   FileJson,
   HelpCircle,
+  ListMinus,
   Printer,
   Plus,
   Redo2,
@@ -121,6 +122,20 @@ type AgentResponse = {
   reply: string;
   operations: AssistantOperation[];
 };
+
+type PendingAssistantAction =
+  | {
+      type: "removeSubcriteria";
+      parentId: string;
+      parentName: string;
+      targetName: string;
+      childNames: string[];
+    }
+  | {
+      type: "resetCriteria";
+      targetName: string;
+      criterionNames: string[];
+    };
 
 type ActiveModal = "alternatives" | "matrix" | "results" | "help" | null;
 type HelpTopic = "use" | "method" | "steps" | "agent" | "files" | "results";
@@ -475,7 +490,9 @@ function layoutCriteria(criteria: Criterion[], rootName: string, selectedId?: st
 
 function CriterionFlowNode({ data }: { data: CriterionNodeData }) {
   return (
-    <div className={`criterion-node ${data.selected ? "selected" : ""} ${data.isLeaf ? "leaf" : "parent"}`}>
+    <div
+      className={`criterion-node ${data.selected ? "selected" : ""} ${data.isRoot ? "root" : data.isLeaf ? "leaf" : "parent"}`}
+    >
       {!data.isRoot && <Handle type="target" position={Position.Left} className="flow-handle" />}
       <strong>{data.label}</strong>
       {!data.isRoot && (
@@ -530,7 +547,9 @@ function App() {
   const [chatOpen, setChatOpen] = useState(true);
   const [chatInput, setChatInput] = useState("");
   const [assistantThinking, setAssistantThinking] = useState(false);
+  const [pendingAssistantAction, setPendingAssistantAction] = useState<PendingAssistantAction | null>(null);
   const [fileMenuOpen, setFileMenuOpen] = useState(false);
+  const [fileMenuMode, setFileMenuMode] = useState<"root" | "export">("root");
   const [helpMenuOpen, setHelpMenuOpen] = useState(false);
   const [helpTopic, setHelpTopic] = useState<HelpTopic>("use");
   const [notice, setNotice] = useState("");
@@ -624,6 +643,7 @@ function App() {
 
     commit((current) => ({
       ...current,
+      rootName: "Overall",
       alternatives: [],
       criteria: [first, second],
     }));
@@ -773,6 +793,32 @@ function App() {
     downloadText(`matriz-${slugify(model.rootName || "decisão")}.csv`, toCsv([headers, ...rows]), "text/csv");
   };
 
+  const exportDecisionCsv = () => {
+    const matrixHeaders = ["Alternativa", ...leaves.map((leaf) => leaf.criterion.name)];
+    const matrixRows = model.alternatives.map((alternative) => [
+      alternative.name,
+      ...leaves.map((leaf) => String(leaf.criterion.performances?.[alternative.id] ?? "")),
+    ]);
+    const resultHeaders = ["Alternativa", "Total", ...leaves.map((leaf) => leaf.criterion.name)];
+    const resultRows = results.map((result) => [
+      result.name,
+      formatNumber(result.score),
+      ...leaves.map((leaf) => formatNumber(result.contributions.find((item) => item.id === leaf.criterion.id)?.value ?? 0)),
+    ]);
+
+    downloadText(
+      `mavt-${slugify(model.rootName || "decisão")}.csv`,
+      [
+        "Matriz de desempenho",
+        toCsv([matrixHeaders, ...matrixRows]),
+        "",
+        "Tabela de desempenho MAVT",
+        toCsv([resultHeaders, ...resultRows]),
+      ].join("\n"),
+      "text/csv",
+    );
+  };
+
   const exportResultsPdf = () => {
     window.print();
   };
@@ -818,17 +864,54 @@ function App() {
     setChatInput("");
     setAssistantThinking(true);
 
-    try {
-      const agentResponse = await requestAgentResponse(text, model);
-      const applied = applyAssistantOperations(agentResponse.operations, model, setNotice);
+    if (pendingAssistantAction && isConfirmationMessage(text)) {
+      const applied = applyPendingAssistantAction(pendingAssistantAction, model);
       if (applied.model !== model) {
         commit(() => applied.model);
         if (applied.selectedId) setSelectedId(applied.selectedId);
       }
-      setMessages((items) => [...items, { role: "assistant", text: agentResponse.reply }]);
+      setPendingAssistantAction(null);
+      setMessages((items) => [...items, { role: "assistant", text: applied.reply }]);
+      setAssistantThinking(false);
+      return;
+    }
+
+    if (pendingAssistantAction) setPendingAssistantAction(null);
+
+    try {
+      const agentResponse = await requestAgentResponse(text, model);
+      const applied = applyAssistantOperations(agentResponse.operations, model, setNotice);
+      const pendingAction = inferPendingAssistantAction(text, model);
+      if (applied.model !== model) {
+        commit(() => applied.model);
+        if (applied.selectedId) setSelectedId(applied.selectedId);
+      }
+      if (applied.model === model && agentResponse.operations.length === 0) {
+        const localResponse = interpretCommand(text, model, commit, setSelectedId, setNotice);
+        const localUnderstood = !localResponse.startsWith("Ainda ");
+        setPendingAssistantAction(localUnderstood ? pendingAction : null);
+        setMessages((items) => [
+          ...items,
+          {
+            role: "assistant",
+            text: localUnderstood
+              ? `${localResponse} Usei o agente local porque a IA real não retornou operações aplicáveis.`
+              : agentResponse.reply,
+          },
+        ]);
+      } else if (applied.model === model && pendingAction) {
+        const reply = pendingAssistantActionPrompt(pendingAction);
+        setPendingAssistantAction(pendingAction);
+        setNotice(reply);
+        setMessages((items) => [...items, { role: "assistant", text: reply }]);
+      } else {
+        setPendingAssistantAction(null);
+        setMessages((items) => [...items, { role: "assistant", text: agentResponse.reply }]);
+      }
     } catch (error) {
       const response = interpretCommand(text, model, commit, setSelectedId, setNotice);
       const detail = error instanceof Error ? error.message : "erro desconhecido";
+      setPendingAssistantAction(response.startsWith("Ainda ") ? null : inferPendingAssistantAction(text, model));
       setMessages((items) => [
         ...items,
         {
@@ -889,48 +972,62 @@ function App() {
               Matriz
             </button>
             <div className="file-menu">
-              <button onClick={() => setFileMenuOpen((open) => !open)}>
+              <button
+                onClick={() => {
+                  setFileMenuOpen((open) => !open);
+                  setFileMenuMode("root");
+                }}
+              >
                 <FileJson size={16} />
                 Arquivos
               </button>
               {fileMenuOpen && (
                 <div className="file-menu-popover">
-                  <button
-                    onClick={() => {
-                      setFileMenuOpen(false);
-                      fileInputRef.current?.click();
-                    }}
-                  >
-                    <Upload size={16} />
-                    Importar
-                  </button>
-                  <button
-                    onClick={() => {
-                      setFileMenuOpen(false);
-                      exportCompleteJson();
-                    }}
-                  >
-                    <FileJson size={16} />
-                    Exportar JSON
-                  </button>
-                  <button
-                    onClick={() => {
-                      setFileMenuOpen(false);
-                      exportResultsCsv();
-                    }}
-                  >
-                    <Download size={16} />
-                    Exportar resultados
-                  </button>
-                  <button
-                    onClick={() => {
-                      setFileMenuOpen(false);
-                      exportMatrixCsv();
-                    }}
-                  >
-                    <Table2 size={16} />
-                    Exportar matriz CSV
-                  </button>
+                  {fileMenuMode === "root" ? (
+                    <>
+                      <button
+                        onClick={() => {
+                          setFileMenuOpen(false);
+                          setFileMenuMode("root");
+                          fileInputRef.current?.click();
+                        }}
+                      >
+                        <Upload size={16} />
+                        Importar
+                      </button>
+                      <button onClick={() => setFileMenuMode("export")}>
+                        <Download size={16} />
+                        Exportar
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <button className="menu-back-button" onClick={() => setFileMenuMode("root")}>
+                        <ChevronLeft size={16} />
+                        Voltar
+                      </button>
+                      <button
+                        onClick={() => {
+                          setFileMenuOpen(false);
+                          setFileMenuMode("root");
+                          exportCompleteJson();
+                        }}
+                      >
+                        <FileJson size={16} />
+                        JSON
+                      </button>
+                      <button
+                        onClick={() => {
+                          setFileMenuOpen(false);
+                          setFileMenuMode("root");
+                          exportDecisionCsv();
+                        }}
+                      >
+                        <Table2 size={16} />
+                        CSV
+                      </button>
+                    </>
+                  )}
                 </div>
               )}
             </div>
@@ -1399,7 +1496,7 @@ function applyAssistantOperations(
           const parent = findParent(draft.criteria, criterion.id);
           const canRemove = parent ? (parent.children?.length ?? 0) > 2 : draft.criteria.length > 2;
           if (!canRemove) {
-            setNotice("Remocao bloqueada: o pai ficaria com apenas um filho.");
+            setNotice(buildBlockedCriterionRemovalMessage(criterion, parent, draft.criteria));
             continue;
           }
           draft = { ...draft, criteria: normalizeTreeAfterRemoval(removeCriterion(draft.criteria, criterion.id)) };
@@ -1514,6 +1611,89 @@ function interpretCommand(
   return "Ainda não consegui transformar esse texto em alterações. Tente citar alternativas, critérios, pesos, subcritérios ou uma curva de valor.";
 }
 
+function buildBlockedCriterionRemovalMessage(criterion: Criterion, parent: Criterion | undefined, rootCriteria: Criterion[]) {
+  if (parent) {
+    const siblingNames = (parent.children ?? []).map((child) => child.name).join(" e ");
+    return `Não removi ${criterion.name}, porque ${parent.name} ficaria com apenas um subcritério. Cada critério composto precisa ter no mínimo 2 subcritérios. Posso remover os dois subcritérios de ${parent.name} (${siblingNames}) e transformar ${parent.name} em folha?`;
+  }
+
+  const rootNames = rootCriteria.map((item) => item.name).join(" e ");
+  return `Não removi ${criterion.name}, porque a árvore ficaria com apenas um critério principal. A raiz precisa ter no mínimo 2 critérios. Posso remover os critérios principais (${rootNames}) e reiniciar a estrutura?`;
+}
+
+function isConfirmationMessage(rawText: string) {
+  const text = normalizeText(rawText);
+  return /^(sim|pode|pode sim|ok|confirmo|confirmado|claro|remova|remover)(\.|!|\s)*$/.test(text);
+}
+
+function inferPendingAssistantAction(rawText: string, model: DecisionModel): PendingAssistantAction | null {
+  const text = normalizeText(rawText);
+  const match =
+    text.match(/(?:remova|apague|exclua|delete)\s+(?:o\s+)?criterio\s+(.+)/) ??
+    text.match(/^(?:remova|apague|exclua|delete)\s+(.+)$/);
+  const target = match?.[1] ? removeTrailingCommand(match[1]) : "";
+  if (!target) return null;
+
+  const criterion = findCriterionByName(model.criteria, target);
+  if (!criterion) return null;
+  const parent = findParent(model.criteria, criterion.id);
+  if (parent && (parent.children?.length ?? 0) <= 2) {
+    return {
+      type: "removeSubcriteria",
+      parentId: parent.id,
+      parentName: parent.name,
+      targetName: criterion.name,
+      childNames: (parent.children ?? []).map((child) => child.name),
+    };
+  }
+
+  if (!parent && model.criteria.length <= 2) {
+    return {
+      type: "resetCriteria",
+      targetName: criterion.name,
+      criterionNames: model.criteria.map((item) => item.name),
+    };
+  }
+
+  return null;
+}
+
+function applyPendingAssistantAction(action: PendingAssistantAction, model: DecisionModel) {
+  if (action.type === "removeSubcriteria") {
+    const parent = findCriterion(model.criteria, action.parentId);
+    if (!parent) return { model, reply: "Não encontrei mais esse critério para confirmar a remoção." };
+    return {
+      model: {
+        ...model,
+        criteria: updateCriterion(model.criteria, action.parentId, (criterion) => ({
+          ...criterion,
+          children: undefined,
+          scale: { min: 0, max: 10, direction: "benefit", mode: "quantitative" },
+          performances: Object.fromEntries(model.alternatives.map((alternative) => [alternative.id, ""])),
+        })),
+      },
+      reply: `Removi os subcritérios de ${action.parentName} (${action.childNames.join(" e ")}) e transformei ${action.parentName} em folha.`,
+      selectedId: action.parentId,
+    };
+  }
+
+  const first = createCriterion("Critério 1", 50, model.alternatives);
+  const second = createCriterion("Critério 2", 50, model.alternatives);
+  return {
+    model: { ...model, criteria: [first, second] },
+    reply: `Removi os critérios principais (${action.criterionNames.join(" e ")}) e reiniciei a estrutura de critérios.`,
+    selectedId: ROOT_ID,
+  };
+}
+
+function pendingAssistantActionPrompt(action: PendingAssistantAction) {
+  if (action.type === "removeSubcriteria") {
+    return `Não removi ${action.targetName}, porque ${action.parentName} ficaria com apenas um subcritério. Cada critério composto precisa ter no mínimo 2 subcritérios. Posso remover os dois subcritérios de ${action.parentName} (${action.childNames.join(" e ")}) e transformar ${action.parentName} em folha?`;
+  }
+
+  return `Não removi ${action.targetName}, porque a árvore ficaria com apenas um critério principal. A raiz precisa ter no mínimo 2 critérios. Posso remover os critérios principais (${action.criterionNames.join(" e ")}) e reiniciar a estrutura?`;
+}
+
 function applyAssistantClause(
   rawClause: string,
   model: DecisionModel,
@@ -1523,6 +1703,22 @@ function applyAssistantClause(
   const text = normalizeText(clause);
   if (!clause || text.length < 3) return undefined;
   if (isStructuredDescription(text)) return undefined;
+
+  const namedSubcriterionMatch = text.match(
+    /(?:adicione|inclua|crie)\s+(?:um\s+|uma\s+|o\s+|a\s+)?subcriterio\s+(?:em|no|na|ao|a|para)\s+(?:criterio\s+)?(.+?)\s+chamad[oa]\s+(.+)/,
+  );
+  if (namedSubcriterionMatch) {
+    const parent = findCriterionByName(model.criteria, namedSubcriterionMatch[1]);
+    const names = parseNameList(namedSubcriterionMatch[2]);
+    if (!parent) return { model, reply: "Não encontrei o critério que receberia esse subcritério." };
+    if (names.length === 0) return undefined;
+    const next = addSubcriteriaToModel(model, parent.id, names);
+    return {
+      model: next,
+      reply: `Adicionei ${names.join(", ")} em ${parent.name}.`,
+      selectedId: parent.id,
+    };
+  }
 
   const addSubcriteriaMatch = text.match(
     /(?:adicione|inclua|crie)\s+(?:os?\s+)?subcriterios?\s+(.+?)\s+(?:ao|a|no|na|para\s+o|para\s+a)\s+(?:criterio\s+)?(.+)/,
@@ -1551,14 +1747,17 @@ function applyAssistantClause(
   const removeAlternativeMatch = text.match(
     /(?:remova|apague|exclua|delete)\s+(?:as?\s+)?alternativas?\s+(.+)/,
   );
-  if (removeAlternativeMatch || text.match(/^(?:remova|apague|exclua|delete)\s+(.+)$/)) {
-    const target = removeAlternativeMatch?.[1] ?? text.replace(/^(?:remova|apague|exclua|delete)\s+/, "");
+  const genericRemoveMatch = text.match(/^(?:remova|apague|exclua|delete)\s+(.+)$/);
+  if (removeAlternativeMatch || genericRemoveMatch) {
+    const target = removeAlternativeMatch?.[1] ?? genericRemoveMatch?.[1] ?? "";
     const alternative = findAlternativeByName(model.alternatives, target);
-    if (!alternative) return undefined;
-    return {
-      model: removeAlternativeFromModel(model, alternative.id),
-      reply: `Removi ${alternative.name} da avaliacao.`,
-    };
+    if (alternative) {
+      return {
+        model: removeAlternativeFromModel(model, alternative.id),
+        reply: `Removi ${alternative.name} da avaliacao.`,
+      };
+    }
+    if (removeAlternativeMatch) return undefined;
   }
 
   const addAlternativeMatch = text.match(
@@ -1579,14 +1778,19 @@ function applyAssistantClause(
   }
 
   const removeCriterionMatch = text.match(/(?:remova|apague|exclua|delete)\s+(?:o\s+)?criterio\s+(.+)/);
-  if (removeCriterionMatch) {
-    const criterion = findCriterionByName(model.criteria, removeTrailingCommand(removeCriterionMatch[1]));
+  const genericCriterionRemoveTarget = genericRemoveMatch ? removeTrailingCommand(genericRemoveMatch[1]) : "";
+  if (removeCriterionMatch || genericCriterionRemoveTarget) {
+    const criterion = findCriterionByName(
+      model.criteria,
+      removeCriterionMatch ? removeTrailingCommand(removeCriterionMatch[1]) : genericCriterionRemoveTarget,
+    );
     if (!criterion) return { model, reply: "Não encontrei esse critério. Tente usar o nome exibido no nó." };
     const parent = findParent(model.criteria, criterion.id);
     const canRemove = parent ? (parent.children?.length ?? 0) > 2 : model.criteria.length > 2;
     if (!canRemove) {
-      setNotice("Remocao bloqueada: o pai ficaria com apenas um filho.");
-      return { model, reply: "Não removi esse critério porque um nó não pode ficar com apenas um filho." };
+      const reply = buildBlockedCriterionRemovalMessage(criterion, parent, model.criteria);
+      setNotice(reply);
+      return { model, reply };
     }
     return {
       model: { ...model, criteria: normalizeTreeAfterRemoval(removeCriterion(model.criteria, criterion.id)) },
@@ -1779,7 +1983,9 @@ function buildCriteriaFromAgentItems(
 
 function splitAssistantClauses(rawText: string) {
   return rawText
-    .split(/[\n.;]+|\s+e\s+(?=(?:adicione|inclua|crie|remova|apague|exclua|delete|peso|defina|configure|ajuste)\b)/i)
+    .split(
+      /[\n.;]+|,\s*(?=(?:adicione|inclua|crie|remova|apague|exclua|delete|mude|altere|troque|peso|defina|configure|ajuste)\b)|\s+e\s+(?=(?:adicione|inclua|crie|remova|apague|exclua|delete|mude|altere|troque|peso|defina|configure|ajuste)\b)/i,
+    )
     .map((item) => item.trim())
     .filter(Boolean);
 }
@@ -1884,7 +2090,10 @@ function parseFirstNumber(value: string) {
 }
 
 function removeTrailingCommand(value: string) {
-  return value.replace(/\s+(?:e\s+)?(?:adicione|inclua|crie|remova|apague|exclua|delete|peso|defina|configure|ajuste)\b[\s\S]*$/i, "");
+  return value.replace(
+    /\s+(?:e\s+)?(?:adicione|inclua|crie|remova|apague|exclua|delete|mude|altere|troque|peso|defina|configure|ajuste)\b[\s\S]*$/i,
+    "",
+  );
 }
 
 function extractFirst(value: string, patterns: RegExp[]) {
@@ -1993,9 +2202,9 @@ function CriterionInspector({
               Subcritério
             </button>
             {!isRoot && (
-              <button className="danger" onClick={onConvertToLeaf}>
-                <Trash2 size={16} />
-                Transformar em folha
+              <button className="structure-action" onClick={onConvertToLeaf}>
+                <ListMinus size={16} />
+                Remover subcritérios
               </button>
             )}
           </div>
@@ -2385,6 +2594,7 @@ function ResultsPanel({
   alternatives: Alternative[];
   onExportPdf: () => void;
 }) {
+  const [hoveredChart, setHoveredChart] = useState<"score" | "contribution" | "sensitivity" | null>(null);
   const stackedData = results.map((result) => ({
     name: result.name,
     total: result.score,
@@ -2416,13 +2626,15 @@ function ResultsPanel({
       <div className="chart-card">
         <h3>Pontuação ponderada</h3>
         <ResponsiveContainer width="100%" height={205}>
-          <BarChart data={results}>
+          <BarChart data={results} onMouseMove={() => setHoveredChart("score")} onMouseLeave={() => setHoveredChart(null)}>
             <CartesianGrid strokeDasharray="3 3" vertical={false} />
             <XAxis dataKey="name" />
             <YAxis domain={[0, 100]} />
             <Tooltip formatter={(value) => formatTooltipNumber(value)} />
             <Bar dataKey="score" radius={[8, 8, 0, 0]}>
-              <LabelList dataKey="score" position="top" formatter={(value: unknown) => formatTooltipNumber(value)} />
+              {hoveredChart !== "score" && (
+                <LabelList dataKey="score" position="top" formatter={(value: unknown) => formatTooltipNumber(value)} />
+              )}
               {results.map((entry, index) => (
                 <Cell key={entry.id} fill={colors[index % colors.length]} />
               ))}
@@ -2434,7 +2646,7 @@ function ResultsPanel({
       <div className="chart-card">
         <h3>Contribuição por critério</h3>
         <ResponsiveContainer width="100%" height={220}>
-          <BarChart data={stackedData}>
+          <BarChart data={stackedData} onMouseMove={() => setHoveredChart("contribution")} onMouseLeave={() => setHoveredChart(null)}>
             <CartesianGrid strokeDasharray="3 3" vertical={false} />
             <XAxis dataKey="name" />
             <YAxis />
@@ -2442,7 +2654,9 @@ function ResultsPanel({
             <Legend />
             {leaves.map((leaf, index) => (
               <Bar key={leaf.criterion.id} dataKey={leaf.criterion.name} stackId="a" fill={colors[index % colors.length]}>
-                <LabelList dataKey={leaf.criterion.name} position="center" formatter={(value: unknown) => formatTooltipNumber(value)} />
+                {hoveredChart !== "contribution" && (
+                  <LabelList dataKey={leaf.criterion.name} position="center" formatter={(value: unknown) => formatTooltipNumber(value)} />
+                )}
               </Bar>
             ))}
           </BarChart>
@@ -2490,7 +2704,7 @@ function ResultsPanel({
           </select>
         </div>
         <ResponsiveContainer width="100%" height={205}>
-          <LineChart data={sensitivityData}>
+          <LineChart data={sensitivityData} onMouseMove={() => setHoveredChart("sensitivity")} onMouseLeave={() => setHoveredChart(null)}>
             <CartesianGrid strokeDasharray="3 3" />
             <XAxis dataKey="ajuste" />
             <YAxis domain={[0, 100]} />
@@ -2504,7 +2718,9 @@ function ResultsPanel({
                 strokeWidth={2.5}
                 dot={{ r: 3 }}
               >
-                <LabelList dataKey={alternative.name} position="top" formatter={(value: unknown) => formatTooltipNumber(value)} />
+                {hoveredChart !== "sensitivity" && (
+                  <LabelList dataKey={alternative.name} position="top" formatter={(value: unknown) => formatTooltipNumber(value)} />
+                )}
               </Line>
             ))}
           </LineChart>
