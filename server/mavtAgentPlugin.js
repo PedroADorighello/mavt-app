@@ -4,7 +4,7 @@ const DEFAULT_MODEL = "gpt-5.5";
 const DEFAULT_OPENAI_FALLBACK_MODELS = ["gpt-5.4-mini", "gpt-4.1-mini"];
 const DEFAULT_COMPATIBLE_MODEL = "openai/gpt-4o-mini";
 const DEFAULT_MAX_OUTPUT_TOKENS = 900;
-const DEFAULT_COMPATIBLE_MAX_TOKENS = 160;
+const DEFAULT_COMPATIBLE_MAX_TOKENS = 40;
 const DEFAULT_TIMEOUT_MS = 25000;
 export function mavtAgentPlugin(options = {}) {
     return {
@@ -26,7 +26,7 @@ export async function handleAgentRequest(request, response, options) {
         sendJson(response, 405, { error: "Método não permitido." });
         return;
     }
-    const apiKeys = uniqueValues([...(options.apiKeys ?? []), options.apiKey]);
+    const apiKeys = uniqueValues([...splitCsvValues(options.apiKeys), ...splitCsvValues(options.apiKey)]);
     if (apiKeys.length === 0) {
         sendJson(response, 401, {
             error: "OPENAI_API_KEY não configurada. Defina a chave em .env ou no ambiente antes de iniciar o app.",
@@ -199,11 +199,15 @@ function uniqueValues(values) {
         return true;
     });
 }
+function splitCsvValues(value) {
+    const values = Array.isArray(value) ? value : [value];
+    return values.flatMap((item) => (item ?? "").split(",").map((part) => part.trim()));
+}
 function shouldTryFallback(status) {
-    return status === 0 || status === 400 || status === 401 || status === 403 || status === 408 || status === 409 || status === 429 || status >= 500;
+    return status === 0 || status === 400 || status === 401 || status === 402 || status === 403 || status === 408 || status === 409 || status === 429 || status >= 500;
 }
 function normalizedMaxOutputTokens(value, fallback, ceiling = 4000) {
-    return Number.isFinite(value) ? Math.max(80, Math.min(ceiling, Number(value))) : fallback;
+    return Number.isFinite(value) ? Math.max(24, Math.min(ceiling, Number(value))) : fallback;
 }
 function formatAiError(message, status, model) {
     const detail = message?.trim() || "Falha ao chamar a IA.";

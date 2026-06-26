@@ -1,4 +1,4 @@
-import { handleAgentRequest } from "../server/mavtAgentPlugin";
+import { handleAgentRequest } from "../server/mavtAgentPlugin.js";
 
 declare const process: {
   env: Record<string, string | undefined>;

@@ -375,6 +375,11 @@ p {
   border: 1px solid #ead9b5;
 }
 
+.chat-composer {
+  display: grid;
+  gap: 8px;
+}
+
 .prompt-chips {
   display: flex;
   flex-wrap: wrap;
@@ -395,12 +400,32 @@ p {
   gap: 8px;
   grid-template-columns: minmax(0, 1fr) 42px;
   align-items: end;
+  position: relative;
+}
+
+.chat-box textarea {
+  padding-left: 42px;
 }
 
 .chat-box button {
   height: 42px;
   min-width: 42px;
   padding: 0;
+}
+
+.chat-box .prompt-toggle {
+  background: #f7fbfa;
+  border-color: #dbe8e6;
+  color: #35515b;
+  height: 28px;
+  left: 7px;
+  min-height: 28px;
+  min-width: 28px;
+  padding: 0;
+  position: absolute;
+  top: 7px;
+  width: 28px;
+  z-index: 1;
 }
 
 .modal-backdrop {

@@ -123,6 +123,14 @@ type AgentResponse = {
   operations: AssistantOperation[];
 };
 
+type LocalAssistantResult = {
+  model: DecisionModel;
+  reply: string;
+  selectedId?: string;
+  understoodCount: number;
+  clauseCount: number;
+};
+
 type PendingAssistantAction =
   | {
       type: "removeSubcriteria";
@@ -172,6 +180,18 @@ const assistantShortcuts: AssistantShortcut[] = [
   {
     label: "Ajustar peso",
     prompt: "Peso do critério [nome] para [valor]%",
+  },
+  {
+    label: "Remover critério",
+    prompt: "Remova o critério [nome]",
+  },
+  {
+    label: "Preencher desempenho",
+    prompt: "Defina o [critério] do [alternativa] como [valor]",
+  },
+  {
+    label: "Configurar escala",
+    prompt: "Configure [critério] de [mínimo] a [máximo] [menor é melhor/maior é melhor]",
   },
 ];
 
@@ -353,7 +373,7 @@ function getQuantitativeBounds(criterion: Criterion) {
     .map((value) => Number(value))
     .filter(Number.isFinite);
 
-  if (scale.autoBounds !== false && values.length >= 2) {
+  if (scale.autoBounds !== false && values.length > 0) {
     return {
       min: Math.min(...values),
       max: Math.max(...values),
@@ -547,6 +567,7 @@ function App() {
   const [chatOpen, setChatOpen] = useState(true);
   const [chatInput, setChatInput] = useState("");
   const [assistantThinking, setAssistantThinking] = useState(false);
+  const [promptChipsOpen, setPromptChipsOpen] = useState(true);
   const [pendingAssistantAction, setPendingAssistantAction] = useState<PendingAssistantAction | null>(null);
   const [fileMenuOpen, setFileMenuOpen] = useState(false);
   const [fileMenuMode, setFileMenuMode] = useState<"root" | "export">("root");
@@ -878,47 +899,71 @@ function App() {
 
     if (pendingAssistantAction) setPendingAssistantAction(null);
 
-    try {
-      const agentResponse = await requestAgentResponse(text, model);
-      const applied = applyAssistantOperations(agentResponse.operations, model, setNotice);
-      const pendingAction = inferPendingAssistantAction(text, model);
-      if (applied.model !== model) {
-        commit(() => applied.model);
-        if (applied.selectedId) setSelectedId(applied.selectedId);
+    const localResult = interpretCommandLocal(text, model, setNotice);
+    const localUnderstood = localResult.understoodCount > 0;
+    const localComplete = localUnderstood && localResult.understoodCount >= localResult.clauseCount;
+    const pendingAction = localUnderstood ? inferPendingAssistantAction(text, model) : null;
+
+    if (localComplete) {
+      if (localResult.model !== model) {
+        commit(() => localResult.model);
+        if (localResult.selectedId) setSelectedId(localResult.selectedId);
       }
-      if (applied.model === model && agentResponse.operations.length === 0) {
-        const localResponse = interpretCommand(text, model, commit, setSelectedId, setNotice);
-        const localUnderstood = !localResponse.startsWith("Ainda ");
-        setPendingAssistantAction(localUnderstood ? pendingAction : null);
-        setMessages((items) => [
-          ...items,
-          {
-            role: "assistant",
-            text: localUnderstood
-              ? `${localResponse} Usei o agente local porque a IA real não retornou operações aplicáveis.`
-              : agentResponse.reply,
-          },
-        ]);
-      } else if (applied.model === model && pendingAction) {
-        const reply = pendingAssistantActionPrompt(pendingAction);
-        setPendingAssistantAction(pendingAction);
+      setPendingAssistantAction(pendingAction);
+      setMessages((items) => [...items, { role: "assistant", text: localResult.reply }]);
+      setAssistantThinking(false);
+      return;
+    }
+
+    try {
+      const baseModel = localUnderstood ? localResult.model : model;
+      const agentResponse = await requestAgentResponse(text, baseModel);
+      const applied = applyAssistantOperations(agentResponse.operations, baseModel, setNotice);
+      const finalModel = applied.model;
+      const selectedAfter = applied.selectedId ?? localResult.selectedId;
+      if (finalModel !== model) {
+        commit(() => finalModel);
+        if (selectedAfter) setSelectedId(selectedAfter);
+      }
+      const aiPendingAction = inferPendingAssistantAction(text, baseModel);
+      if (finalModel === baseModel && agentResponse.operations.length === 0 && aiPendingAction) {
+        const reply = pendingAssistantActionPrompt(aiPendingAction);
+        setPendingAssistantAction(aiPendingAction);
         setNotice(reply);
         setMessages((items) => [...items, { role: "assistant", text: reply }]);
       } else {
         setPendingAssistantAction(null);
-        setMessages((items) => [...items, { role: "assistant", text: agentResponse.reply }]);
+        const reply =
+          localUnderstood && agentResponse.reply
+            ? `${localResult.reply} ${agentResponse.reply}`
+            : agentResponse.reply;
+        setMessages((items) => [...items, { role: "assistant", text: reply }]);
       }
     } catch (error) {
-      const response = interpretCommand(text, model, commit, setSelectedId, setNotice);
-      const detail = error instanceof Error ? error.message : "erro desconhecido";
-      setPendingAssistantAction(response.startsWith("Ainda ") ? null : inferPendingAssistantAction(text, model));
-      setMessages((items) => [
-        ...items,
-        {
-          role: "assistant",
-          text: `${response} Usei o agente local porque a IA real não respondeu: ${detail}`,
-        },
-      ]);
+      const detail = summarizeAgentError(error);
+      if (localUnderstood) {
+        if (localResult.model !== model) {
+          commit(() => localResult.model);
+          if (localResult.selectedId) setSelectedId(localResult.selectedId);
+        }
+        setPendingAssistantAction(pendingAction);
+        setMessages((items) => [
+          ...items,
+          {
+            role: "assistant",
+            text: `${localResult.reply} Consegui aplicar parte do pedido com o agente local, mas a IA externa falhou ao interpretar o restante: ${detail}`,
+          },
+        ]);
+      } else {
+        setPendingAssistantAction(null);
+        setMessages((items) => [
+          ...items,
+          {
+            role: "assistant",
+            text: `Ainda não consegui transformar esse texto em alterações. A IA externa também falhou: ${detail}`,
+          },
+        ]);
+      }
     } finally {
       setAssistantThinking(false);
     }
@@ -1138,36 +1183,49 @@ function App() {
                 </div>
               ))}
             </div>
-            <div className="prompt-chips" aria-label="Sugestoes para o agente">
-              {assistantShortcuts.map((shortcut) => (
+            <div className="chat-composer">
+              {promptChipsOpen && (
+                <div className="prompt-chips" aria-label="Sugestões para o agente">
+                  {assistantShortcuts.map((shortcut) => (
+                    <button
+                      key={shortcut.label}
+                      type="button"
+                      onClick={() => setChatInput(shortcut.prompt)}
+                      title={shortcut.prompt}
+                    >
+                      {shortcut.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+              <div className="chat-box">
                 <button
-                  key={shortcut.label}
+                  className="prompt-toggle"
                   type="button"
-                  onClick={() => setChatInput(shortcut.prompt)}
-                  title={shortcut.prompt}
+                  onClick={() => setPromptChipsOpen((current) => !current)}
+                  aria-label={promptChipsOpen ? "Recolher prompts recomendados" : "Mostrar prompts recomendados"}
+                  title={promptChipsOpen ? "Recolher prompts recomendados" : "Mostrar prompts recomendados"}
                 >
-                  {shortcut.label}
+                  <HelpCircle size={18} />
                 </button>
-              ))}
-            </div>
-            <div className="chat-box">
-              <textarea
-                value={chatInput}
-                onChange={(event) => setChatInput(event.target.value)}
-                onInput={(event) => autoResizeTextarea(event.currentTarget)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" && !event.shiftKey) {
-                    event.preventDefault();
-                    void runAssistantCommand();
-                  }
-                }}
-                placeholder={assistantThinking ? "Agente pensando..." : "Ex: peso do preco para 35%"}
-                disabled={assistantThinking}
-                rows={1}
-              />
-              <button onClick={runAssistantCommand} aria-label="Enviar comando" disabled={assistantThinking}>
-                <Sparkles size={18} />
-              </button>
+                <textarea
+                  value={chatInput}
+                  onChange={(event) => setChatInput(event.target.value)}
+                  onInput={(event) => autoResizeTextarea(event.currentTarget)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" && !event.shiftKey) {
+                      event.preventDefault();
+                      void runAssistantCommand();
+                    }
+                  }}
+                  placeholder={assistantThinking ? "Agente pensando..." : "Ex: peso do preco para 35%"}
+                  disabled={assistantThinking}
+                  rows={1}
+                />
+                <button onClick={runAssistantCommand} aria-label="Enviar comando" disabled={assistantThinking}>
+                  <Sparkles size={18} />
+                </button>
+              </div>
             </div>
           </aside>
         </main>
@@ -1426,6 +1484,24 @@ async function requestAgentResponse(message: string, model: DecisionModel): Prom
   };
 }
 
+function summarizeAgentError(error: unknown) {
+  const message = error instanceof Error ? error.message : "erro desconhecido";
+  const normalized = normalizeText(message);
+  if (normalized.includes("json valido") || normalized.includes("json")) {
+    return "A IA respondeu fora do formato esperado.";
+  }
+  if (normalized.includes("credit") || normalized.includes("402") || normalized.includes("can only afford")) {
+    return "A IA externa retornou erro de créditos.";
+  }
+  if (normalized.includes("401") || normalized.includes("403") || normalized.includes("auth") || normalized.includes("user not found")) {
+    return "A IA externa retornou erro de autenticação.";
+  }
+  if (normalized.includes("endpoint") || normalized.includes("failed to fetch") || normalized.includes("network")) {
+    return "O endpoint da IA não respondeu.";
+  }
+  return message;
+}
+
 function applyAssistantOperations(
   operations: AssistantOperation[],
   model: DecisionModel,
@@ -1580,35 +1656,81 @@ function interpretCommand(
   setSelectedId: (id: string) => void,
   setNotice: (text: string) => void,
 ) {
+  const result = interpretCommandLocal(rawText, model, setNotice);
+  if (result.model !== model) {
+    commit(() => result.model);
+    if (result.selectedId) setSelectedId(result.selectedId);
+  }
+  return result.reply;
+}
+
+function interpretCommandLocal(
+  rawText: string,
+  model: DecisionModel,
+  setNotice: (text: string) => void,
+): LocalAssistantResult {
   let draft = model;
   let selectedAfter: string | undefined;
   const replies: string[] = [];
+  let understoodCount = 0;
   const structured = interpretStructuredDescription(rawText, draft);
 
   if (structured.model !== draft) {
     draft = structured.model;
     replies.push(...structured.replies);
     selectedAfter = ROOT_ID;
+    understoodCount += 1;
   }
 
-  for (const clause of splitAssistantClauses(rawText)) {
+  const clauses = splitAssistantClauses(rawText);
+  const effectiveClauses = structured.model !== model
+    ? clauses.filter((clause) => !isStructuredDescription(normalizeText(clause)))
+    : clauses;
+
+  for (const clause of effectiveClauses) {
     const result = applyAssistantClause(clause, draft, setNotice);
     if (!result) continue;
     draft = result.model;
     replies.push(result.reply);
     selectedAfter = result.selectedId ?? selectedAfter;
+    understoodCount += 1;
   }
 
   const uniqueReplies = Array.from(new Set(replies.filter(Boolean)));
+  const possibleExtraCommand =
+    effectiveClauses.length === 1 &&
+    /\s+e\s+\S+/i.test(rawText) &&
+    !/\b(?:alternativas?|crit[eé]rios?|subcrit[eé]rios?)\b/i.test(rawText);
+  const clauseCount = Math.max(1, effectiveClauses.length + (structured.model !== model ? 1 : 0) + (possibleExtraCommand ? 1 : 0));
+
   if (draft !== model) {
-    commit(() => draft);
-    if (selectedAfter) setSelectedId(selectedAfter);
-    return uniqueReplies.length
+    return {
+      model: draft,
+      selectedId: selectedAfter,
+      understoodCount,
+      clauseCount,
+      reply: uniqueReplies.length
       ? uniqueReplies.join(" ")
-      : "Atualizei o modelo com as instrucoes que consegui interpretar.";
+      : "Atualizei o modelo com as instruções que consegui interpretar.",
+    };
+  }
+  if (uniqueReplies.length) {
+    return {
+      model: draft,
+      selectedId: selectedAfter,
+      understoodCount,
+      clauseCount,
+      reply: uniqueReplies.join(" "),
+    };
   }
 
-  return "Ainda não consegui transformar esse texto em alterações. Tente citar alternativas, critérios, pesos, subcritérios ou uma curva de valor.";
+  return {
+    model: draft,
+    selectedId: selectedAfter,
+    understoodCount,
+    clauseCount,
+    reply: "Ainda não consegui transformar esse texto em alterações. Tente citar alternativas, critérios, pesos, subcritérios ou uma curva de valor.",
+  };
 }
 
 function buildBlockedCriterionRemovalMessage(criterion: Criterion, parent: Criterion | undefined, rootCriteria: Criterion[]) {
@@ -1720,8 +1842,8 @@ function applyAssistantClause(
     };
   }
 
-  const addSubcriteriaMatch = text.match(
-    /(?:adicione|inclua|crie)\s+(?:os?\s+)?subcriterios?\s+(.+?)\s+(?:ao|a|no|na|para\s+o|para\s+a)\s+(?:criterio\s+)?(.+)/,
+  const addSubcriteriaMatch = clause.match(
+    /(?:adicione|inclua|crie)\s+(?:os?\s+)?subcrit[eé]rios?\s+(.+?)\s+(?:ao|a|no|na|em|para\s+o|para\s+a)\s+(?:crit[eé]rio\s+)?(.+)/i,
   );
   if (addSubcriteriaMatch) {
     const names = parseNameList(addSubcriteriaMatch[1]);
@@ -1847,15 +1969,40 @@ function applyAssistantClause(
     };
   }
 
-  const scaleMatch = text.match(
-    /(?:defina|configure|ajuste).*(?:criterio|curva|funcao|valor)?\s*(.+?)\s+de\s+(\d+(?:[,.]\d+)?)\s+a\s+(\d+(?:[,.]\d+)?)(.*)/,
+  const performanceMatch = clause.match(
+    /(?:defina|configure|ajuste|informe|coloque)\s+(?:o\s+|a\s+)?(.+?)\s+(?:do|da|de|para|em)\s+(.+?)\s+(?:como|=|para|em)\s+(.+)$/i,
+  );
+  if (performanceMatch) {
+    const criterion = findCriterionByName(model.criteria, performanceMatch[1]);
+    const alternative = findAlternativeByName(model.alternatives, performanceMatch[2]);
+    if (!criterion || !alternative || !isLeaf(criterion)) {
+      return { model, reply: "Não encontrei uma folha e uma alternativa compatíveis para preencher esse desempenho." };
+    }
+    const rawValue = cleanPerformanceValue(performanceMatch[3]);
+    const value = parsePerformanceValue(rawValue);
+    if (value === undefined) return { model, reply: "Não consegui identificar o valor de desempenho informado." };
+    return {
+      model: {
+        ...model,
+        criteria: updateCriterion(model.criteria, criterion.id, (item) => ({
+          ...item,
+          performances: { ...(item.performances ?? {}), [alternative.id]: value },
+        })),
+      },
+      reply: `Defini ${criterion.name} de ${alternative.name} como ${rawValue}.`,
+      selectedId: criterion.id,
+    };
+  }
+
+  const scaleMatch = clause.match(
+    /(?:defina|configure|ajuste)\s+(?:a\s+|o\s+)?(?:(?:escala|curva|fun[çc][aã]o(?:\s+de\s+valor)?)\s+(?:do|da|de)\s+)?(?:crit[eé]rio\s+)?(.+?)\s+de\s+(\d+(?:[,.]\d+)?)\s+a\s+(\d+(?:[,.]\d+)?)(.*)$/i,
   );
   if (scaleMatch) {
     const criterion = findCriterionByName(model.criteria, scaleMatch[1]);
     if (!criterion || !isLeaf(criterion)) return { model, reply: "Não encontrei uma folha compatível para configurar a curva." };
     const min = Number(scaleMatch[2].replace(",", "."));
     const max = Number(scaleMatch[3].replace(",", "."));
-    const tail = scaleMatch[4];
+    const tail = normalizeText(scaleMatch[4]);
     const direction: Direction = tail.includes("menor") || tail.includes("custo") ? "cost" : "benefit";
     return {
       model: {
@@ -2052,7 +2199,7 @@ function parseWeightedItems(value: string) {
 function parseNameList(value: string) {
   return removeTrailingCommand(value)
     .replace(/\s+(?:e|ou)\s+/gi, ",")
-    .split(/[,;/]+/)
+    .split(/[,;]+/)
     .map(cleanName)
     .filter(Boolean);
 }
@@ -2073,7 +2220,10 @@ function cleanName(value: string) {
   return titleCase(
     value
       .replace(/\[[^\]]*\]/g, "")
-      .replace(/\b(?:o|a|os|as|um|uma|criterio|criterios|critério|critérios|alternativa|alternativas|subcriterio|subcriterios|subcritério|subcritérios)\b/gi, "")
+      .replace(
+        /(^|\s)(?:o|a|os|as|um|uma|criterio|criterios|critério|critérios|alternativa|alternativas|subcriterio|subcriterios|subcritério|subcritérios)(?=\s|$)/gi,
+        " ",
+      )
       .replace(/\b(?:sao|são|serao|serão|sera|será|eh|e|é|com|peso|para|ao|no|na|do|da|de)\b$/gi, "")
       .replace(/[:.]+$/g, "")
       .trim(),
@@ -2087,6 +2237,17 @@ function normalizeText(value: string) {
 function parseFirstNumber(value: string) {
   const match = value.match(/(\d+(?:[,.]\d+)?)\s*%?/);
   return match ? Number(match[1].replace(",", ".")) : undefined;
+}
+
+function cleanPerformanceValue(value: string) {
+  return value.replace(/[.;]+$/g, "").trim();
+}
+
+function parsePerformanceValue(value: string) {
+  const numeric = value.match(/^-?\d+(?:[,.]\d+)?$/);
+  if (numeric) return Number(value.replace(",", "."));
+  const text = cleanName(value);
+  return text || undefined;
 }
 
 function removeTrailingCommand(value: string) {
@@ -2108,7 +2269,12 @@ function titleCase(value: string) {
   return value
     .split(" ")
     .filter(Boolean)
-    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .map((word, index) => {
+      const lower = word.toLowerCase();
+      if (index > 0 && ["de", "da", "do", "das", "dos", "e"].includes(lower)) return lower;
+      if (/[A-Z]{2,}|\d/.test(word)) return word;
+      return word.charAt(0).toUpperCase() + word.slice(1);
+    })
     .join(" ");
 }
 
@@ -2148,6 +2314,8 @@ function CriterionInspector({
   const scale = criterion?.scale ?? { min: 0, max: 10, direction: "benefit" as Direction };
   const scaleMode = scale.mode ?? "quantitative";
   const quantitativeBounds = criterion ? getQuantitativeBounds(criterion) : { min: scale.min, max: scale.max };
+  const displayedMin = scale.autoBounds !== false ? quantitativeBounds.min : scale.min;
+  const displayedMax = scale.autoBounds !== false ? quantitativeBounds.max : scale.max;
   const valuePoints = scale.valuePoints ?? [];
   const qualitativeOptions = scale.qualitativeOptions ?? [
     { id: "qual-ruim", label: "Ruim", score: 0 },
@@ -2265,7 +2433,7 @@ function CriterionInspector({
                   Mínimo
                   <input
                     type="number"
-                    value={scale.min}
+                    value={displayedMin}
                     disabled={scale.autoBounds !== false}
                     onChange={(event) =>
                       onChange((item) => ({
@@ -2279,7 +2447,7 @@ function CriterionInspector({
                   Máximo
                   <input
                     type="number"
-                    value={scale.max}
+                    value={displayedMax}
                     disabled={scale.autoBounds !== false}
                     onChange={(event) =>
                       onChange((item) => ({
@@ -2887,7 +3055,8 @@ function renderHelpTopic(topic: HelpTopic) {
           <li>remova a alternativa Corolla</li>
           <li>adicione critério risco com peso 20%</li>
           <li>adicione um subcritério em Qualidade chamado Design</li>
-          <li>configure preço de 0 a 200 menor melhor</li>
+          <li>configure preço de 0 a 200 menor é melhor</li>
+          <li>configure conforto de 0 a 10 maior é melhor</li>
           <li>as alternativas são Alfa, Beta e Gama; os critérios são custo, qualidade e prazo</li>
         </ul>
         <p>
