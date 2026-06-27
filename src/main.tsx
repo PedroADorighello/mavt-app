@@ -820,7 +820,6 @@ function App() {
   const step3Ready = weightNodes.length > 0 && !weightResetMode && !currentWeightNode;
   const currentStepReady =
     activeStep === 1 ? step1Ready : activeStep === 2 ? step2Ready : activeStep === 3 ? step3Ready : true;
-  const canExportDecision = activeStep === 4 && step1Ready && step2Ready && step3Ready;
   const assistantAvailable = activeStep === 1 || activeStep === 3;
   const visibleChatOpen = assistantAvailable && chatOpen;
   const currentAssistantShortcuts = assistantShortcutsByStep[activeStep] ?? [];
@@ -1188,10 +1187,6 @@ function App() {
   };
 
   const exportCompleteJson = () => {
-    if (!canExportDecision) {
-      setNotice("A exportacao fica disponivel apenas na etapa 4, com o estudo completo.");
-      return;
-    }
     downloadText(
       `mavt-${slugify(model.rootName || "decisão")}.json`,
       JSON.stringify(
@@ -1228,10 +1223,6 @@ function App() {
   };
 
   const exportDecisionCsv = () => {
-    if (!canExportDecision) {
-      setNotice("A exportacao fica disponivel apenas na etapa 4, com o estudo completo.");
-      return;
-    }
     const matrixHeaders = ["Alternativa", ...leaves.map((leaf) => leaf.criterion.name)];
     const matrixRows = model.alternatives.map((alternative) => [
       alternative.name,
@@ -1505,11 +1496,7 @@ function App() {
                         <Upload size={16} />
                         Importar
                       </button>
-                      <button
-                        onClick={() => setFileMenuMode("export")}
-                        disabled={!canExportDecision}
-                        title={canExportDecision ? "Exportar estudo completo" : "DisponÃ­vel apenas na etapa 4"}
-                      >
+                      <button onClick={() => setFileMenuMode("export")}>
                         <Download size={16} />
                         Exportar
                       </button>
