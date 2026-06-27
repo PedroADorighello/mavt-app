@@ -14,6 +14,7 @@ import "@xyflow/react/dist/style.css";
 import {
   BarChart3,
   Bot,
+  CheckCircle2,
   ChevronLeft,
   ChevronRight,
   Download,
@@ -147,6 +148,20 @@ type PendingAssistantAction =
 
 type ActiveModal = "alternatives" | "matrix" | "results" | "help" | null;
 type HelpTopic = "use" | "method" | "steps" | "agent" | "files" | "results";
+type MavtStep = 1 | 2 | 3 | 4;
+type Step1Phase = "structure" | "configure";
+
+type AppSnapshot = {
+  model: DecisionModel;
+  activeStep: MavtStep;
+  step1Phase: Step1Phase;
+  configuredCriterionIds: string[];
+  alternativesReady: boolean;
+  matrixReady: boolean;
+  completedWeightNodeIds: string[];
+  weightResetMode: boolean;
+  selectedId: string;
+};
 
 type CriterionNodeData = {
   criterion?: Criterion;
@@ -154,28 +169,27 @@ type CriterionNodeData = {
   globalWeight: number;
   isLeaf: boolean;
   isRoot: boolean;
+  needsConfiguration: boolean;
+  weightReady: boolean;
+  clickableHint: boolean;
+  showWeights: boolean;
+  nameEditable: boolean;
   label: string;
+  onRename?: (id: string, name: string) => void;
 };
 
 const ROOT_ID = "__overall__";
 const colors = ["#78a6c8", "#f2a7a1", "#9bcf9f", "#e9c46a", "#b59bd8", "#7ac7c4"];
+const mavtSteps: Array<{ id: MavtStep; title: string; caption: string }> = [
+  { id: 1, title: "Critérios", caption: "Árvore, métrica e curva" },
+  { id: 2, title: "Alternativas", caption: "Matriz de desempenho" },
+  { id: 3, title: "Pesos", caption: "Importância local" },
+  { id: 4, title: "Resultados", caption: "Ranking e sensibilidade" },
+];
 const assistantShortcuts: AssistantShortcut[] = [
   {
     label: "Adicionar critério",
-    prompt: "Adicione o critério [nome] com peso [valor]%",
-  },
-  {
-    label: "Adicionar alternativa",
-    prompt: "Adicione a alternativa [nome]",
-  },
-  {
-    label: "Definir problema",
-    prompt:
-      "As alternativas são [A], [B], [C] e o problema central é [objetivo]. Os critérios são [critério 1], [critério 2], [critério 3].",
-  },
-  {
-    label: "Subcritérios",
-    prompt: "Adicione os subcritérios [subcritério 1], [subcritério 2] ao critério [nome do critério]",
+    prompt: "Adicione [nome] em [critério pai]",
   },
   {
     label: "Ajustar peso",
@@ -186,14 +200,41 @@ const assistantShortcuts: AssistantShortcut[] = [
     prompt: "Remova o critério [nome]",
   },
   {
-    label: "Preencher desempenho",
-    prompt: "Defina o [critério] do [alternativa] como [valor]",
-  },
-  {
     label: "Configurar escala",
     prompt: "Configure [critério] de [mínimo] a [máximo] [menor é melhor/maior é melhor]",
   },
 ];
+
+const assistantShortcutsByStep: Partial<Record<MavtStep, AssistantShortcut[]>> = {
+  1: [
+    {
+      label: "Adicionar criterio",
+      prompt: "Adicione [nome] em [criterio pai]",
+    },
+    {
+      label: "Configurar escala",
+      prompt: "Configure [criterio] de [minimo] a [maximo] [menor e melhor/maior e melhor]",
+    },
+    {
+      label: "Curva de valor",
+      prompt: "Curva de valor de [criterio]: [valor A] - [score A]; [valor B] - [score B]; ...",
+    },
+    {
+      label: "Remover criterio",
+      prompt: "Remova o criterio [nome]",
+    },
+  ],
+  3: [
+    {
+      label: "Ajustar peso",
+      prompt: "Peso do criterio [nome] para [valor]%",
+    },
+    {
+      label: "Definir pesos",
+      prompt: "Peso dos criterios [criterio A, criterio B, ...] para [valor de A, valor de B, ...]%",
+    },
+  ],
+};
 
 const helpTopics: Array<{ id: HelpTopic; label: string }> = [
   { id: "use", label: "Como usar o software" },
@@ -206,60 +247,19 @@ const helpTopics: Array<{ id: HelpTopic; label: string }> = [
 
 const initialModel: DecisionModel = {
   rootName: "Overall",
-  alternatives: [
-    { id: "alt-civic", name: "Civic" },
-    { id: "alt-corolla", name: "Corolla" },
-    { id: "alt-hb20", name: "HB20" },
-  ],
+  alternatives: [],
   criteria: [
     {
-      id: "crit-custo",
-      name: "Custo",
-      weight: 35,
-      children: [
-        {
-          id: "crit-preco",
-          name: "Preço",
-          weight: 75,
-          scale: { min: 80000, max: 150000, direction: "cost" },
-          performances: { "alt-civic": 145000, "alt-corolla": 142000, "alt-hb20": 88000 },
-        },
-        {
-          id: "crit-manutencao",
-          name: "Manutenção",
-          weight: 25,
-          scale: { min: 2500, max: 9000, direction: "cost" },
-          performances: { "alt-civic": 7400, "alt-corolla": 6900, "alt-hb20": 3900 },
-        },
-      ],
+      id: "crit-1",
+      name: "Critério 1",
+      weight: 50,
+      performances: {},
     },
     {
-      id: "crit-qualidade",
-      name: "Qualidade",
-      weight: 40,
-      children: [
-        {
-          id: "crit-seguranca",
-          name: "Segurança",
-          weight: 55,
-          scale: { min: 0, max: 10, direction: "benefit" },
-          performances: { "alt-civic": 9.2, "alt-corolla": 9, "alt-hb20": 7.4 },
-        },
-        {
-          id: "crit-conforto",
-          name: "Conforto",
-          weight: 45,
-          scale: { min: 0, max: 10, direction: "benefit" },
-          performances: { "alt-civic": 8.8, "alt-corolla": 8.5, "alt-hb20": 6.8 },
-        },
-      ],
-    },
-    {
-      id: "crit-sustentabilidade",
-      name: "Sustentabilidade",
-      weight: 25,
-      scale: { min: 0, max: 10, direction: "benefit" },
-      performances: { "alt-civic": 7.8, "alt-corolla": 8.6, "alt-hb20": 7 },
+      id: "crit-2",
+      name: "Critério 2",
+      weight: 50,
+      performances: {},
     },
   ],
 };
@@ -343,6 +343,13 @@ function addWeightedSibling(items: Criterion[], item: Criterion, preferredWeight
   return normalizeSiblings([...items, { ...item, weight: preferredWeight }], item.id, preferredWeight);
 }
 
+function setSiblingWeights(items: Criterion[], weightsById: Map<string, number>) {
+  return items.map((item) => ({
+    ...item,
+    weight: weightsById.has(item.id) ? clamp(weightsById.get(item.id) ?? item.weight, 0, 100) : item.weight,
+  }));
+}
+
 function collectLeaves(criteria: Criterion[], multiplier = 1): Array<{ criterion: Criterion; weight: number }> {
   const total = sumWeights(criteria);
   return criteria.flatMap((criterion) => {
@@ -352,8 +359,71 @@ function collectLeaves(criteria: Criterion[], multiplier = 1): Array<{ criterion
   });
 }
 
+function isPerformanceMatrixComplete(alternatives: Alternative[], leaves: Array<{ criterion: Criterion; weight: number }>) {
+  return (
+    alternatives.length > 0 &&
+    leaves.length > 0 &&
+    leaves.every(({ criterion }) =>
+      alternatives.every((alternative) => {
+        const value = criterion.performances?.[alternative.id];
+        return value !== undefined && value !== "";
+      }),
+    )
+  );
+}
+
+function collectWeightNodes(criteria: Criterion[]) {
+  const nodes: Array<{ id: string; name: string; children: Criterion[] }> = [
+    { id: ROOT_ID, name: "Raiz", children: criteria },
+  ];
+
+  const walk = (items: Criterion[]) => {
+    items.forEach((criterion) => {
+      if (!isLeaf(criterion)) {
+        nodes.push({ id: criterion.id, name: criterion.name, children: criterion.children ?? [] });
+        walk(criterion.children ?? []);
+      }
+    });
+  };
+
+  walk(criteria);
+  return nodes.filter((node) => node.children.length > 0);
+}
+
+function hasConfiguredValueScale(criterion: Criterion) {
+  const scale = criterion.scale;
+  if (!scale) return false;
+  const mode = scale.mode ?? "quantitative";
+  if (mode === "qualitative") {
+    return (scale.qualitativeOptions ?? []).length >= 2;
+  }
+  if (scale.manualCurve) {
+    return (scale.valuePoints ?? []).length >= 2;
+  }
+  return Number.isFinite(scale.min) && Number.isFinite(scale.max) && scale.min !== scale.max;
+}
+
+function isPlaceholderCriterionName(name: string) {
+  return /^(novo crit[eé]rio|subcrit[eé]rio|subcrit[eé]rio [ab]?)$/i.test(name.trim());
+}
+
+function canMarkCriterionConfigured(criterion: Criterion) {
+  return isLeaf(criterion) && !isPlaceholderCriterionName(criterion.name) && hasConfiguredValueScale(criterion);
+}
+
+function needsCriterionConfiguration(criterion: Criterion, configuredIds: Set<string>) {
+  if (isPlaceholderCriterionName(criterion.name)) return true;
+  return isLeaf(criterion) && (!configuredIds.has(criterion.id) || !canMarkCriterionConfigured(criterion));
+}
+
+function isRootTarget(value: string, rootName: string) {
+  const text = normalizeText(cleanName(value));
+  const root = normalizeText(rootName);
+  return ["raiz", "root", "objetivo", "problema", "overall"].includes(text) || Boolean(root && text === root);
+}
+
 function valueFor(criterion: Criterion, rawValue: number | string | undefined): number {
-  const scale = criterion.scale ?? { min: 0, max: 10, direction: "benefit" as Direction };
+  const scale = criterion.scale ?? { min: 0, max: 10, direction: "benefit" as Direction, autoBounds: false };
   if (scale.mode === "qualitative") {
     const option = scale.qualitativeOptions?.find((item) => item.id === rawValue || item.label === rawValue);
     return clamp01((option?.score ?? 0) / 100);
@@ -368,12 +438,12 @@ function valueFor(criterion: Criterion, rawValue: number | string | undefined): 
 }
 
 function getQuantitativeBounds(criterion: Criterion) {
-  const scale = criterion.scale ?? { min: 0, max: 10, direction: "benefit" as Direction };
+  const scale = criterion.scale ?? { min: 0, max: 10, direction: "benefit" as Direction, autoBounds: false };
   const values = Object.values(criterion.performances ?? {})
     .map((value) => Number(value))
     .filter(Number.isFinite);
 
-  if (scale.autoBounds !== false && values.length > 0) {
+  if (scale.autoBounds === true && values.length > 0) {
     return {
       min: Math.min(...values),
       max: Math.max(...values),
@@ -381,6 +451,19 @@ function getQuantitativeBounds(criterion: Criterion) {
   }
 
   return { min: scale.min, max: scale.max };
+}
+
+function normalizePerformanceForScale(criterion: Criterion, value: number | string) {
+  const scale = criterion.scale ?? { min: 0, max: 10, direction: "benefit" as Direction, autoBounds: false };
+  if ((scale.mode ?? "quantitative") === "qualitative") return value;
+  if (typeof value === "string" && value.trim() === "") return "";
+
+  const numericValue = typeof value === "number" ? value : Number(value.replace(",", "."));
+  if (!Number.isFinite(numericValue) || scale.autoBounds === true) return value;
+
+  const min = Number.isFinite(scale.min) ? scale.min : 0;
+  const max = Number.isFinite(scale.max) ? scale.max : 10;
+  return clamp(numericValue, Math.min(min, max), Math.max(min, max));
 }
 
 function scoreFromValuePoints(value: number, points: ValuePoint[] | undefined) {
@@ -427,7 +510,18 @@ function calculateResults(model: DecisionModel) {
     .sort((a, b) => b.score - a.score);
 }
 
-function layoutCriteria(criteria: Criterion[], rootName: string, selectedId?: string) {
+function layoutCriteria(
+  criteria: Criterion[],
+  rootName: string,
+  selectedId: string | undefined,
+  activeStep: MavtStep,
+  step1Phase: Step1Phase,
+  configuredCriterionIds: Set<string>,
+  onRename: (id: string, name: string) => void,
+  weightResetMode: boolean,
+  currentWeightNodeId?: string,
+  completedWeightNodeIds: Set<string> = new Set(),
+) {
   const nodes: Node<CriterionNodeData>[] = [];
   const edges: Edge[] = [];
   const rootTotal = sumWeights(criteria);
@@ -470,6 +564,15 @@ function layoutCriteria(criteria: Criterion[], rootName: string, selectedId?: st
         globalWeight,
         isLeaf: children.length === 0,
         isRoot: false,
+        needsConfiguration: activeStep === 1 && step1Phase === "configure" && needsCriterionConfiguration(criterion, configuredCriterionIds),
+        weightReady: completedWeightNodeIds.has(criterion.id),
+        clickableHint:
+          activeStep === 1
+            ? step1Phase === "configure" && needsCriterionConfiguration(criterion, configuredCriterionIds)
+            : activeStep === 3 && (weightResetMode ? children.length > 0 : currentWeightNodeId === criterion.id),
+        showWeights: activeStep >= 3,
+        nameEditable: activeStep === 1 && step1Phase === "configure" && children.length > 0,
+        onRename,
       },
       draggable: false,
     });
@@ -501,6 +604,12 @@ function layoutCriteria(criteria: Criterion[], rootName: string, selectedId?: st
       globalWeight: 1,
       isLeaf: false,
       isRoot: true,
+      needsConfiguration: false,
+      weightReady: completedWeightNodeIds.has(ROOT_ID),
+      clickableHint: activeStep === 3 && (weightResetMode || currentWeightNodeId === ROOT_ID),
+      showWeights: activeStep >= 3,
+      nameEditable: activeStep === 1 && step1Phase === "configure",
+      onRename,
     },
     draggable: false,
   });
@@ -509,13 +618,63 @@ function layoutCriteria(criteria: Criterion[], rootName: string, selectedId?: st
 }
 
 function CriterionFlowNode({ data }: { data: CriterionNodeData }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(data.label);
+
+  useEffect(() => {
+    if (!editing) setDraft(data.label);
+  }, [data.label, editing]);
+
+  const finishEditing = () => {
+    const next = draft.trim();
+    setEditing(false);
+    if (next && next !== data.label) data.onRename?.(data.isRoot ? ROOT_ID : data.criterion?.id ?? "", next);
+  };
+
   return (
     <div
-      className={`criterion-node ${data.selected ? "selected" : ""} ${data.isRoot ? "root" : data.isLeaf ? "leaf" : "parent"}`}
+      className={`criterion-node ${data.selected ? "selected" : ""} ${data.isRoot ? "root" : data.isLeaf ? "leaf" : "parent"} ${data.needsConfiguration ? "needs-config" : ""} ${data.clickableHint ? "clickable-hint" : ""} ${data.weightReady ? "weight-ready" : ""}`}
     >
       {!data.isRoot && <Handle type="target" position={Position.Left} className="flow-handle" />}
-      <strong>{data.label}</strong>
-      {!data.isRoot && (
+      {data.needsConfiguration && <span className="node-status-dot" aria-hidden="true" />}
+      {editing ? (
+        <input
+          className="node-name-input"
+          value={draft}
+          autoFocus
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={(event) => event.stopPropagation()}
+          onChange={(event) => setDraft(event.target.value)}
+          onBlur={finishEditing}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              finishEditing();
+            }
+            if (event.key === "Escape") {
+              event.preventDefault();
+              setDraft(data.label);
+              setEditing(false);
+            }
+          }}
+        />
+      ) : (
+        <strong
+          className={data.nameEditable ? "node-name editable" : "node-name"}
+          onPointerDown={(event) => {
+            if (data.nameEditable) event.stopPropagation();
+          }}
+          onClick={(event) => {
+            if (!data.nameEditable) return;
+            event.stopPropagation();
+            setEditing(true);
+          }}
+          title={data.nameEditable ? "Clique para editar o nome" : undefined}
+        >
+          {data.label}
+        </strong>
+      )}
+      {!data.isRoot && data.showWeights && (
         <div className="node-meta">
           <span>{formatWeight(data.criterion?.weight ?? 100)}% local</span>
           <span>{Math.round(data.globalWeight * 100)}% global</span>
@@ -555,12 +714,19 @@ function Modal({
 }
 
 function App() {
-  const [past, setPast] = useState<DecisionModel[]>([]);
-  const [future, setFuture] = useState<DecisionModel[]>([]);
+  const [past, setPast] = useState<AppSnapshot[]>([]);
+  const [future, setFuture] = useState<AppSnapshot[]>([]);
   const [model, setModel] = useState(() => ({
     ...initialModel,
     criteria: normalizeSiblings(initialModel.criteria),
   }));
+  const [activeStep, setActiveStep] = useState<MavtStep>(1);
+  const [step1Phase, setStep1Phase] = useState<Step1Phase>("structure");
+  const [configuredCriterionIds, setConfiguredCriterionIds] = useState<Set<string>>(() => new Set());
+  const [alternativesReady, setAlternativesReady] = useState(false);
+  const [matrixReady, setMatrixReady] = useState(false);
+  const [completedWeightNodeIds, setCompletedWeightNodeIds] = useState<Set<string>>(() => new Set());
+  const [weightResetMode, setWeightResetMode] = useState(false);
   const [selectedId, setSelectedId] = useState(ROOT_ID);
   const [activeModal, setActiveModal] = useState<ActiveModal>(null);
   const [inspectorOpen, setInspectorOpen] = useState(false);
@@ -583,13 +749,124 @@ function App() {
   ]);
   const [sensitivityLeafId, setSensitivityLeafId] = useState("crit-preco");
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const fileMenuRef = useRef<HTMLDivElement | null>(null);
+  const helpMenuRef = useRef<HTMLDivElement | null>(null);
+
+  const createSnapshot = (modelValue = model): AppSnapshot => ({
+    model: modelValue,
+    activeStep,
+    step1Phase,
+    configuredCriterionIds: Array.from(configuredCriterionIds),
+    alternativesReady,
+    matrixReady,
+    completedWeightNodeIds: Array.from(completedWeightNodeIds),
+    weightResetMode,
+    selectedId,
+  });
+
+  const restoreSnapshot = (snapshot: AppSnapshot) => {
+    setModel(snapshot.model);
+    setActiveStep(snapshot.activeStep);
+    setStep1Phase(snapshot.step1Phase);
+    setConfiguredCriterionIds(new Set(snapshot.configuredCriterionIds));
+    setAlternativesReady(snapshot.alternativesReady);
+    setMatrixReady(snapshot.matrixReady);
+    setCompletedWeightNodeIds(new Set(snapshot.completedWeightNodeIds));
+    setWeightResetMode(snapshot.weightResetMode);
+    setSelectedId(snapshot.selectedId);
+    setActiveModal(null);
+    setInspectorOpen(false);
+    setNotice("");
+  };
+
+  const pushHistory = () => {
+    setPast((items) => [...items, createSnapshot()].slice(-40));
+    setFuture([]);
+  };
+
+  const commit = (updater: (current: DecisionModel) => DecisionModel) => {
+    setModel((current) => {
+      const next = updater(current);
+      setPast((items) => [...items, createSnapshot(current)].slice(-40));
+      setFuture([]);
+      return next;
+    });
+  };
+
+  const renameTreeNode = (id: string, name: string) => {
+    const clean = name.trim();
+    if (!clean) return;
+    if (id === ROOT_ID) {
+      commit((current) => ({ ...current, rootName: clean }));
+      return;
+    }
+    commit((current) => ({ ...current, criteria: updateCriterion(current.criteria, id, (criterion) => ({ ...criterion, name: clean })) }));
+  };
 
   const leaves = useMemo(() => collectLeaves(model.criteria), [model.criteria]);
   const results = useMemo(() => calculateResults(model), [model]);
-  const flow = useMemo(() => layoutCriteria(model.criteria, model.rootName, selectedId), [
+  const weightNodes = useMemo(() => collectWeightNodes(model.criteria), [model.criteria]);
+  const currentWeightNode = useMemo(
+    () => weightNodes.find((node) => !completedWeightNodeIds.has(node.id)),
+    [completedWeightNodeIds, weightNodes],
+  );
+  const treeStructureReady = model.criteria.length > 0 && leaves.length > 0;
+  const criteriaConfigurationsReady =
+    flattenCriteria(model.criteria).length > 0 &&
+    flattenCriteria(model.criteria).every((criterion) => !needsCriterionConfiguration(criterion, configuredCriterionIds));
+  const step1Ready = step1Phase === "configure" && treeStructureReady && criteriaConfigurationsReady;
+  const matrixComplete = isPerformanceMatrixComplete(model.alternatives, leaves);
+  const step2Ready = alternativesReady && matrixReady && matrixComplete;
+  const step3Ready = weightNodes.length > 0 && !weightResetMode && !currentWeightNode;
+  const currentStepReady =
+    activeStep === 1 ? step1Ready : activeStep === 2 ? step2Ready : activeStep === 3 ? step3Ready : true;
+  const canExportDecision = activeStep === 4 && step1Ready && step2Ready && step3Ready;
+  const assistantAvailable = activeStep === 1 || activeStep === 3;
+  const visibleChatOpen = assistantAvailable && chatOpen;
+  const currentAssistantShortcuts = assistantShortcutsByStep[activeStep] ?? [];
+  const alternativeButtonClass =
+    activeStep === 2 ? (alternativesReady ? "step2-action-ready" : "step2-action-emphasis") : "";
+  const matrixButtonClass =
+    activeStep === 2 && alternativesReady ? (matrixReady && matrixComplete ? "step2-action-ready" : "step2-action-emphasis") : "";
+
+  useEffect(() => {
+    if (!fileMenuOpen && !helpMenuOpen) return;
+
+    const closeMenusOnOutsideClick = (event: MouseEvent) => {
+      const target = event.target as globalThis.Node;
+      const clickedFileMenu = fileMenuRef.current?.contains(target);
+      const clickedHelpMenu = helpMenuRef.current?.contains(target);
+      if (clickedFileMenu || clickedHelpMenu) return;
+      setFileMenuOpen(false);
+      setHelpMenuOpen(false);
+      setFileMenuMode("root");
+    };
+
+    document.addEventListener("mousedown", closeMenusOnOutsideClick);
+    return () => document.removeEventListener("mousedown", closeMenusOnOutsideClick);
+  }, [fileMenuOpen, helpMenuOpen]);
+
+  const flow = useMemo(() => layoutCriteria(
     model.criteria,
     model.rootName,
     selectedId,
+    activeStep,
+    step1Phase,
+    configuredCriterionIds,
+    renameTreeNode,
+    weightResetMode,
+    currentWeightNode?.id,
+    completedWeightNodeIds,
+  ), [
+    activeStep,
+    completedWeightNodeIds,
+    configuredCriterionIds,
+    currentWeightNode?.id,
+    model.criteria,
+    model.rootName,
+    selectedId,
+    step1Phase,
+    weightResetMode,
   ]);
   const selectedCriterion = selectedId === ROOT_ID ? undefined : findCriterion(model.criteria, selectedId);
   const selectedChildren = selectedId === ROOT_ID ? model.criteria : selectedCriterion?.children ?? [];
@@ -597,34 +874,56 @@ function App() {
   const canDeleteSelected =
     selectedId !== ROOT_ID &&
     (selectedParent ? (selectedParent.children?.length ?? 0) > 2 : model.criteria.length > 2);
-
-  const commit = (updater: (current: DecisionModel) => DecisionModel) => {
-    setModel((current) => {
-      const next = updater(current);
-      setPast((items) => [...items, current].slice(-40));
-      setFuture([]);
-      return next;
-    });
+  const canOpenStep = (step: MavtStep) =>
+    step === 1 ||
+    (step === 2 && step1Ready) ||
+    (step === 3 && step1Ready && step2Ready) ||
+    (step === 4 && step1Ready && step2Ready && step3Ready);
+  const goToStep = (step: MavtStep) => {
+    if (!canOpenStep(step)) return;
+    if (step === activeStep) return;
+    pushHistory();
+    setActiveStep(step);
+    if (step !== 3) setWeightResetMode(false);
+    setActiveModal(null);
+    setInspectorOpen(false);
+    setNotice("");
   };
+  const goToNextStep = () => {
+    const next = Math.min(4, activeStep + 1) as MavtStep;
+    goToStep(next);
+  };
+  const currentStageText =
+    activeStep === 1
+      ? step1Phase === "structure"
+        ? "Clique nos nós para construir a árvore e adicionar subcritérios."
+        : "Edite nomes de critérios compostos no nó. Clique nas folhas para editar nome, métrica e curva."
+      : activeStep === 2
+        ? alternativesReady
+          ? "Abra a matriz para completar os desempenhos das alternativas."
+          : "Clique em Alternativa para definir as opções de decisão."
+      : activeStep === 3
+          ? weightResetMode
+            ? "Clique nos critérios destacados para redefinir pesos. Quando terminar, clique em Pronto."
+            : currentWeightNode
+            ? `Clique em ${currentWeightNode.id === ROOT_ID ? "Raiz" : currentWeightNode.name} para definir os pesos.`
+            : "Todos os pesos foram definidos."
+          : "Clique em Resultados para visualizar o ranking MAVT.";
 
   const undo = () => {
-    setPast((items) => {
-      const previous = items[items.length - 1];
-      if (!previous) return items;
-      setFuture((next) => [model, ...next]);
-      setModel(previous);
-      return items.slice(0, -1);
-    });
+    const previous = past[past.length - 1];
+    if (!previous) return;
+    setPast((items) => items.slice(0, -1));
+    setFuture((items) => [createSnapshot(), ...items]);
+    restoreSnapshot(previous);
   };
 
   const redo = () => {
-    setFuture((items) => {
-      const next = items[0];
-      if (!next) return items;
-      setPast((previous) => [...previous, model]);
-      setModel(next);
-      return items.slice(1);
-    });
+    const next = future[0];
+    if (!next) return;
+    setFuture((items) => items.slice(1));
+    setPast((items) => [...items, createSnapshot()]);
+    restoreSnapshot(next);
   };
 
   const openResults = () => {
@@ -633,17 +932,23 @@ function App() {
     setActiveModal("results");
   };
 
-  const addRootCriterion = () => {
-    const criterion: Criterion = {
+  const addRootCriterion = (names: string | string[] = "Novo critério") => {
+    const criterionNames = uniqueNames(Array.isArray(names) ? names : [names]);
+    if (criterionNames.length === 0) return;
+    const criteria = criterionNames.map((name) => ({
       id: uid("crit"),
-      name: "Novo critério",
+      name,
       weight: 20,
-      scale: { min: 0, max: 10, direction: "benefit" },
       performances: {},
-    };
-    commit((current) => ({ ...current, criteria: addWeightedSibling(current.criteria, criterion, 20) }));
-    setSelectedId(criterion.id);
-    setInspectorOpen(true);
+    }));
+    commit((current) => ({
+      ...current,
+      criteria: criteria.reduce((items, criterion) => addWeightedSibling(items, criterion, 20), current.criteria),
+    }));
+    setMatrixReady(false);
+    setWeightResetMode(false);
+    setStep1Phase("structure");
+    setSelectedId(criteria[0].id);
   };
 
   const resetDecision = () => {
@@ -651,14 +956,12 @@ function App() {
       id: uid("crit"),
       name: "Critério 1",
       weight: 50,
-      scale: { min: 0, max: 10, direction: "benefit", mode: "quantitative" },
       performances: {},
     };
     const second: Criterion = {
       id: uid("crit"),
       name: "Critério 2",
       weight: 50,
-      scale: { min: 0, max: 10, direction: "benefit", mode: "quantitative" },
       performances: {},
     };
 
@@ -668,48 +971,59 @@ function App() {
       alternatives: [],
       criteria: [first, second],
     }));
+    setActiveStep(1);
+    setStep1Phase("structure");
+    setConfiguredCriterionIds(new Set());
+    setAlternativesReady(false);
+    setMatrixReady(false);
+    setCompletedWeightNodeIds(new Set());
+    setWeightResetMode(false);
     setSelectedId(ROOT_ID);
     setInspectorOpen(false);
     setActiveModal(null);
   };
 
-  const addChildCriterion = (parentId: string) => {
-    const child: Criterion = {
-      id: uid("crit"),
-      name: "Subcritério",
-      weight: 20,
-      scale: { min: 0, max: 10, direction: "benefit" },
-      performances: {},
-    };
+  const addChildCriterion = (parentId: string, names = ["Subcritério"]) => {
+    const childNames = uniqueNames(names);
+    if (childNames.length === 0) return;
     commit((current) => ({
       ...current,
       criteria: updateCriterion(current.criteria, parentId, (criterion) => {
         const children = criterion.children ?? [];
+        const newChildren = childNames.map((name) => ({
+          id: uid("crit"),
+          name,
+          weight: 20,
+          performances: {},
+        }));
         if (children.length === 0) {
-          const first: Criterion = {
+          const fallback: Criterion = {
             id: uid("crit"),
-            name: "Subcritério A",
+            name: "Novo subcritério",
             weight: 50,
-            scale: criterion.scale ?? { min: 0, max: 10, direction: "benefit" },
-            performances: { ...(criterion.performances ?? {}) },
+            performances: {},
           };
-          const second: Criterion = {
-            id: uid("crit"),
-            name: "Subcritério B",
-            weight: 50,
-            scale: criterion.scale ?? { min: 0, max: 10, direction: "benefit" },
-            performances: { ...(criterion.performances ?? {}) },
-          };
-          return { ...criterion, children: [first, second], scale: undefined, performances: undefined };
+          const firstChildren = newChildren.length === 1 ? [...newChildren, fallback] : newChildren;
+          return { ...criterion, children: normalizeSiblings(firstChildren), scale: undefined, performances: undefined };
         }
-        return { ...criterion, children: addWeightedSibling(children, child, 20) };
+        return { ...criterion, children: normalizeSiblings([...children, ...newChildren]), scale: undefined, performances: undefined };
       }),
     }));
+    setCompletedWeightNodeIds(new Set());
+    setMatrixReady(false);
+    setWeightResetMode(false);
+    setStep1Phase("structure");
   };
 
   const updateSelected = (updater: (criterion: Criterion) => Criterion) => {
     if (selectedId === ROOT_ID) return;
     commit((current) => ({ ...current, criteria: updateCriterion(current.criteria, selectedId, updater) }));
+    setConfiguredCriterionIds((current) => {
+      if (!current.has(selectedId)) return current;
+      const next = new Set(current);
+      next.delete(selectedId);
+      return next;
+    });
   };
 
   const updateSiblingWeight = (childId: string, weight: number) => {
@@ -734,6 +1048,15 @@ function App() {
       return;
     }
     commit((current) => ({ ...current, criteria: normalizeTreeAfterRemoval(removeCriterion(current.criteria, selectedId)) }));
+    setConfiguredCriterionIds((current) => {
+      const next = new Set(current);
+      next.delete(selectedId);
+      return next;
+    });
+    setCompletedWeightNodeIds(new Set());
+    setMatrixReady(false);
+    setWeightResetMode(false);
+    setStep1Phase("structure");
     setSelectedId(ROOT_ID);
     setInspectorOpen(false);
   };
@@ -741,6 +1064,7 @@ function App() {
   const addAlternative = (name = "Nova alternativa") => {
     const alternative = { id: uid("alt"), name };
     commit((current) => ({ ...current, alternatives: [...current.alternatives, alternative] }));
+    setMatrixReady(false);
   };
 
   const removeAlternative = (id: string) => {
@@ -753,16 +1077,97 @@ function App() {
         return { ...criterion, performances };
       }),
     }));
+    setMatrixReady(false);
   };
 
   const setPerformance = (criterionId: string, alternativeId: string, value: number | string) => {
     commit((current) => ({
       ...current,
-      criteria: updateCriterion(current.criteria, criterionId, (criterion) => ({
-        ...criterion,
-        performances: { ...(criterion.performances ?? {}), [alternativeId]: value },
-      })),
+      criteria: updateCriterion(current.criteria, criterionId, (criterion) => {
+        const normalizedValue = normalizePerformanceForScale(criterion, value);
+        return {
+          ...criterion,
+          performances: { ...(criterion.performances ?? {}), [alternativeId]: normalizedValue },
+        };
+      }),
     }));
+    setMatrixReady(false);
+  };
+
+  const markSelectedCriterionConfigured = () => {
+    if (!selectedCriterion || !isLeaf(selectedCriterion) || isPlaceholderCriterionName(selectedCriterion.name)) {
+      setNotice("Defina um nome específico antes de marcar o critério como pronto.");
+      return;
+    }
+    if (selectedCriterion.scale && !hasConfiguredValueScale(selectedCriterion)) {
+      setNotice("Defina uma curva de valor válida antes de marcar como pronto.");
+      return;
+    }
+    if (!selectedCriterion.scale) {
+      commit((current) => ({
+        ...current,
+        criteria: updateCriterion(current.criteria, selectedCriterion.id, (criterion) => ({
+          ...criterion,
+          scale: { min: 0, max: 10, direction: "benefit", mode: "quantitative", autoBounds: false },
+        })),
+      }));
+    }
+    setConfiguredCriterionIds((current) => new Set(current).add(selectedCriterion.id));
+    setNotice("");
+    setInspectorOpen(false);
+  };
+
+  const markCurrentWeightReady = () => {
+    if (!currentWeightNode || selectedId !== currentWeightNode.id) {
+      setNotice("Siga a ordem destacada na árvore para definir os pesos.");
+      return;
+    }
+    pushHistory();
+    setCompletedWeightNodeIds((current) => new Set(current).add(currentWeightNode.id));
+    setInspectorOpen(false);
+    setNotice("");
+  };
+
+  const resetWeightConfiguration = () => {
+    pushHistory();
+    setCompletedWeightNodeIds(new Set());
+    setWeightResetMode(true);
+    setSelectedId(ROOT_ID);
+    setInspectorOpen(false);
+    setNotice("Pesos liberados para redefinição. Clique nos critérios destacados e finalize em Pronto.");
+  };
+
+  const finishWeightReset = () => {
+    pushHistory();
+    setCompletedWeightNodeIds(new Set(weightNodes.map((node) => node.id)));
+    setWeightResetMode(false);
+    setInspectorOpen(false);
+    setNotice("");
+  };
+
+  const markAlternativesReady = () => {
+    if (model.alternatives.length === 0 || model.alternatives.some((alternative) => !alternative.name.trim())) {
+      setNotice("Defina pelo menos uma alternativa com nome antes de avançar para a matriz.");
+      return;
+    }
+    pushHistory();
+    setAlternativesReady(true);
+    setActiveModal(null);
+    setNotice("");
+  };
+
+  const isMatrixComplete = () =>
+    isPerformanceMatrixComplete(model.alternatives, leaves);
+
+  const markMatrixReady = () => {
+    if (!isMatrixComplete()) {
+      setNotice("Complete todos os valores da matriz de desempenho antes de marcar como pronta.");
+      return;
+    }
+    pushHistory();
+    setMatrixReady(true);
+    setActiveModal(null);
+    setNotice("");
   };
 
   const convertSelectedToLeaf = () => {
@@ -772,13 +1177,21 @@ function App() {
       criteria: updateCriterion(current.criteria, selectedId, (criterion) => ({
         ...criterion,
         children: undefined,
-        scale: { min: 0, max: 10, direction: "benefit", mode: "quantitative" },
+        scale: undefined,
         performances: {},
       })),
     }));
+    setCompletedWeightNodeIds(new Set());
+    setMatrixReady(false);
+    setWeightResetMode(false);
+    setStep1Phase("structure");
   };
 
   const exportCompleteJson = () => {
+    if (!canExportDecision) {
+      setNotice("A exportacao fica disponivel apenas na etapa 4, com o estudo completo.");
+      return;
+    }
     downloadText(
       `mavt-${slugify(model.rootName || "decisão")}.json`,
       JSON.stringify(
@@ -815,6 +1228,10 @@ function App() {
   };
 
   const exportDecisionCsv = () => {
+    if (!canExportDecision) {
+      setNotice("A exportacao fica disponivel apenas na etapa 4, com o estudo completo.");
+      return;
+    }
     const matrixHeaders = ["Alternativa", ...leaves.map((leaf) => leaf.criterion.name)];
     const matrixRows = model.alternatives.map((alternative) => [
       alternative.name,
@@ -852,11 +1269,20 @@ function App() {
         const parsed = JSON.parse(text);
         const importedModel = isDecisionModel(parsed) ? parsed : isDecisionModel(parsed?.model) ? parsed.model : undefined;
         if (!importedModel) throw new Error("JSON não contém um modelo MAVT válido.");
-        commit(() => sanitizeDecisionModel(importedModel));
+        const sanitizedModel = sanitizeDecisionModel(importedModel);
+        const importState = inferImportedModelState(sanitizedModel, importedModel);
+        commit(() => sanitizedModel);
+        setActiveStep(importState.activeStep);
+        setStep1Phase(importState.step1Phase);
+        setConfiguredCriterionIds(importState.configuredCriterionIds);
+        setAlternativesReady(importState.alternativesReady);
+        setMatrixReady(importState.matrixReady);
+        setCompletedWeightNodeIds(importState.completedWeightNodeIds);
+        setWeightResetMode(false);
         setSelectedId(ROOT_ID);
         setInspectorOpen(false);
         setActiveModal(null);
-        setNotice("Arquivo JSON importado.");
+        setNotice(`Arquivo JSON importado. Continue na etapa ${importState.activeStep}.`);
         return;
       }
 
@@ -879,11 +1305,20 @@ function App() {
   };
 
   const runAssistantCommand = async () => {
+    if (!assistantAvailable) return;
     const text = chatInput.trim();
     if (!text || assistantThinking) return;
     setMessages((items) => [...items, { role: "user", text }]);
     setChatInput("");
     setAssistantThinking(true);
+
+    const stepGuardMessage = getAssistantStepGuardMessage(text, activeStep);
+    if (stepGuardMessage) {
+      setPendingAssistantAction(null);
+      setMessages((items) => [...items, { role: "assistant", text: stepGuardMessage }]);
+      setAssistantThinking(false);
+      return;
+    }
 
     if (pendingAssistantAction && isConfirmationMessage(text)) {
       const applied = applyPendingAssistantAction(pendingAssistantAction, model);
@@ -999,24 +1434,54 @@ function App() {
             </div>
             <div>
               <h1>MAVT Workspace</h1>
-              <p>Decisão multicritério em uma área de trabalho limpa</p>
+              <p>Teoria do Valor de Múltiplos Atributos</p>
             </div>
           </div>
 
+          <nav className="stepper" aria-label="Etapas MAVT">
+            {mavtSteps.map((step) => {
+              const open = canOpenStep(step.id);
+              return (
+                <button
+                  key={step.id}
+                  className={`${activeStep === step.id ? "active" : ""} ${open ? "" : "locked"}`}
+                  onClick={() => goToStep(step.id)}
+                  disabled={!open}
+                  title={step.caption}
+                >
+                  <span>{step.id}</span>
+                  <strong>{step.title}</strong>
+                </button>
+              );
+            })}
+          </nav>
+
           <div className="toolbar">
-            <button className="primary" onClick={openResults}>
+            <button
+              className={`primary ${activeStep === 4 ? "results-emphasis" : ""}`}
+              onClick={openResults}
+              disabled={activeStep !== 4}
+            >
               <BarChart3 size={16} />
               Resultados
             </button>
-            <button onClick={() => setActiveModal("alternatives")}>
+            <button
+              className={alternativeButtonClass}
+              onClick={() => setActiveModal("alternatives")}
+              disabled={activeStep !== 2}
+            >
               <Plus size={16} />
               Alternativa
             </button>
-            <button onClick={() => setActiveModal("matrix")}>
+            <button
+              className={matrixButtonClass}
+              onClick={() => setActiveModal("matrix")}
+              disabled={activeStep !== 2 || !alternativesReady}
+            >
               <Table2 size={16} />
               Matriz
             </button>
-            <div className="file-menu">
+            <div className="file-menu" ref={fileMenuRef}>
               <button
                 onClick={() => {
                   setFileMenuOpen((open) => !open);
@@ -1040,7 +1505,11 @@ function App() {
                         <Upload size={16} />
                         Importar
                       </button>
-                      <button onClick={() => setFileMenuMode("export")}>
+                      <button
+                        onClick={() => setFileMenuMode("export")}
+                        disabled={!canExportDecision}
+                        title={canExportDecision ? "Exportar estudo completo" : "DisponÃ­vel apenas na etapa 4"}
+                      >
                         <Download size={16} />
                         Exportar
                       </button>
@@ -1076,7 +1545,7 @@ function App() {
                 </div>
               )}
             </div>
-            <div className="file-menu">
+            <div className="file-menu" ref={helpMenuRef}>
               <button onClick={() => setHelpMenuOpen((open) => !open)}>
                 <HelpCircle size={16} />
                 Ajuda
@@ -1125,15 +1594,92 @@ function App() {
           </div>
         </header>
 
-        <main className={`workspace ${chatOpen ? "with-chat" : ""}`}>
+        <main className={`workspace ${visibleChatOpen ? "with-chat" : ""}`}>
           <section className="tree-workspace">
             <div className="panel-heading tree-title-heading">
-              <input
-                className="root-title-input"
-                value={model.rootName}
-                onChange={(event) => commit((current) => ({ ...current, rootName: event.target.value }))}
-                aria-label="Nome do problema central"
-              />
+              <div className="stage-helper">
+                <span className="eyebrow">
+                  Etapa {activeStep}
+                  {activeStep === 1 ? ` · ${step1Phase === "structure" ? "Construir árvore" : "Configurar critérios"}` : ""}
+                </span>
+                <p>{currentStageText}</p>
+                {activeStep === 1 && (
+                  <div className="stage-phase-track" aria-label="Fases da etapa 1">
+                    <button
+                      className={step1Phase === "structure" ? "selected" : ""}
+                      onClick={() => {
+                        if (step1Phase !== "structure") pushHistory();
+                        setStep1Phase("structure");
+                        setInspectorOpen(false);
+                        setNotice("");
+                      }}
+                    >
+                      1A Construir árvore
+                    </button>
+                    <button
+                      className={step1Phase === "configure" ? "selected" : ""}
+                      onClick={() => {
+                        if (step1Phase !== "configure") pushHistory();
+                        setStep1Phase("configure");
+                        setInspectorOpen(false);
+                        setNotice("");
+                      }}
+                      disabled={!treeStructureReady}
+                    >
+                      1B Configurar critérios
+                    </button>
+                  </div>
+                )}
+              </div>
+              <div className="stage-actions">
+                {activeStep === 1 && step1Phase === "structure" && (
+                  <button
+                    className="primary"
+                    onClick={() => {
+                      pushHistory();
+                      setStep1Phase("configure");
+                      setInspectorOpen(false);
+                      setNotice("");
+                    }}
+                    disabled={!treeStructureReady}
+                  >
+                    Configurar critérios
+                    <ChevronRight size={16} />
+                  </button>
+                )}
+                {activeStep === 1 && step1Phase === "configure" && (
+                  <button
+                    onClick={() => {
+                      pushHistory();
+                      setStep1Phase("structure");
+                      setInspectorOpen(false);
+                      setNotice("");
+                    }}
+                  >
+                    <ChevronLeft size={16} />
+                    Voltar para árvore
+                  </button>
+                )}
+                {activeStep === 3 && !weightResetMode && completedWeightNodeIds.size > 0 && (
+                  <button onClick={resetWeightConfiguration}>
+                    <RotateCcw size={16} />
+                    Redefinir pesos
+                  </button>
+                )}
+                {activeStep === 3 && weightResetMode && (
+                  <button className="primary next-step-ready" onClick={finishWeightReset}>
+                    <CheckCircle2 size={16} />
+                    Pronto
+                  </button>
+                )}
+                {activeStep < 4 && currentStepReady && (
+                  <button className="primary next-step-ready" onClick={goToNextStep}>
+                    <CheckCircle2 size={16} />
+                    Próxima etapa
+                    <ChevronRight size={16} />
+                  </button>
+                )}
+              </div>
             </div>
             <div className="flow-wrap main-tree">
               <ReactFlow
@@ -1144,6 +1690,25 @@ function App() {
                 minZoom={0.35}
                 maxZoom={1.4}
                 onNodeClick={(_, node) => {
+                  if (activeStep === 2 || activeStep === 4) return;
+                  const clickedCriterion = node.id === ROOT_ID ? undefined : findCriterion(model.criteria, node.id);
+                  if (activeStep === 1 && step1Phase === "configure") {
+                    if (!clickedCriterion || !isLeaf(clickedCriterion)) {
+                      setNotice("Nesta fase, edite o nome diretamente no nó. Use Voltar para árvore para mudar a estrutura.");
+                      return;
+                    }
+                  }
+                  if (activeStep === 3) {
+                    if (weightResetMode) {
+                      if (node.id !== ROOT_ID && (!clickedCriterion || isLeaf(clickedCriterion))) {
+                        setNotice("Na redefinição de pesos, clique na raiz ou em critérios compostos destacados.");
+                        return;
+                      }
+                    } else if (node.id !== currentWeightNode?.id) {
+                      setNotice("Clique no nó destacado para seguir a ordem dos pesos.");
+                      return;
+                    }
+                  }
                   setSelectedId(node.id);
                   setNotice("");
                   setInspectorOpen(true);
@@ -1156,13 +1721,14 @@ function App() {
             </div>
           </section>
 
-          {!chatOpen && (
+          {assistantAvailable && !chatOpen && (
             <button className="chat-restore" onClick={() => setChatOpen(true)} aria-label="Abrir chat da IA">
               <ChevronLeft size={18} />
               IA
             </button>
           )}
 
+          {assistantAvailable && (
           <aside className={`ai-panel ${chatOpen ? "open" : "closed"}`}>
             <div className="ai-heading">
               <div className="ai-avatar">
@@ -1186,7 +1752,7 @@ function App() {
             <div className="chat-composer">
               {promptChipsOpen && (
                 <div className="prompt-chips" aria-label="Sugestões para o agente">
-                  {assistantShortcuts.map((shortcut) => (
+                  {currentAssistantShortcuts.map((shortcut) => (
                     <button
                       key={shortcut.label}
                       type="button"
@@ -1218,7 +1784,13 @@ function App() {
                       void runAssistantCommand();
                     }
                   }}
-                  placeholder={assistantThinking ? "Agente pensando..." : "Ex: peso do preco para 35%"}
+                  placeholder={
+                    assistantThinking
+                      ? "Agente pensando..."
+                      : activeStep === 1
+                        ? "Ex: adicione prazo em qualidade"
+                        : "Ex: peso do custo para 35%"
+                  }
                   disabled={assistantThinking}
                   rows={1}
                 />
@@ -1228,6 +1800,7 @@ function App() {
               </div>
             </div>
           </aside>
+          )}
         </main>
 
         {activeModal === "results" && (
@@ -1248,26 +1821,38 @@ function App() {
 
         {inspectorOpen && (
           <Modal
-            title={selectedId === ROOT_ID ? "Editar pesos principais" : `Editar ${selectedCriterion?.name ?? "critério"}`}
+            title={selectedId === ROOT_ID ? `Editar ${model.rootName}` : `Editar ${selectedCriterion?.name ?? "critério"}`}
             size="compact"
             onClose={() => setInspectorOpen(false)}
           >
             <CriterionInspector
+              activeStep={activeStep}
+              step1Phase={step1Phase}
               selectedId={selectedId}
               criterion={selectedCriterion}
               children={selectedChildren}
               alternatives={model.alternatives}
               canDelete={canDeleteSelected}
               notice={notice}
+              criterionConfigured={
+                selectedCriterion
+                  ? configuredCriterionIds.has(selectedCriterion.id) && canMarkCriterionConfigured(selectedCriterion)
+                  : false
+              }
+              currentWeightNodeId={currentWeightNode?.id}
+              weightResetMode={weightResetMode}
               rootName={model.rootName}
               onChange={updateSelected}
               onRootNameChange={(rootName) => commit((current) => ({ ...current, rootName }))}
               onSiblingWeightChange={updateSiblingWeight}
               onDelete={deleteSelected}
-              onAddChild={() => {
-                selectedId === ROOT_ID ? addRootCriterion() : addChildCriterion(selectedId);
+              onAddChildren={(names) => {
+                selectedId === ROOT_ID ? addRootCriterion(names) : addChildCriterion(selectedId, names);
+                setInspectorOpen(false);
               }}
               onConvertToLeaf={convertSelectedToLeaf}
+              onMarkCriterionConfigured={markSelectedCriterionConfigured}
+              onMarkWeightsReady={markCurrentWeightReady}
               onPerformanceChange={(alternativeId, value) =>
                 selectedId !== ROOT_ID && setPerformance(selectedId, alternativeId, value)
               }
@@ -1280,6 +1865,7 @@ function App() {
             alternatives={model.alternatives}
             onClose={() => setActiveModal(null)}
             onAdd={addAlternative}
+            onReady={markAlternativesReady}
             onRemove={removeAlternative}
             onRename={(id, name) =>
               commit((current) => ({
@@ -1297,6 +1883,7 @@ function App() {
             alternatives={model.alternatives}
             leaves={leaves}
             onClose={() => setActiveModal(null)}
+            onReady={markMatrixReady}
             onPerformanceChange={setPerformance}
           />
         )}
@@ -1443,6 +2030,100 @@ function sanitizeCriteria(criteria: Criterion[]): Criterion[] {
       weight: Number.isFinite(criterion.weight) ? criterion.weight : 100,
       children,
     };
+  });
+}
+
+function inferImportedModelState(model: DecisionModel, rawModel: DecisionModel) {
+  const leaves = collectLeaves(model.criteria);
+  const allCriteria = flattenCriteria(model.criteria);
+  const configuredCriterionIds = new Set(
+    allCriteria.filter((criterion) => isLeaf(criterion) && canMarkCriterionConfigured(criterion)).map((criterion) => criterion.id),
+  );
+  const alternativesReady =
+    model.alternatives.length > 0 && model.alternatives.every((alternative) => alternative.name.trim().length > 0);
+  const matrixReady = alternativesReady && isPerformanceMatrixComplete(model.alternatives, leaves);
+  const weightNodes = collectWeightNodes(model.criteria);
+  const weightsReady = hasDefinedWeightGroups(rawModel.criteria);
+  const completedWeightNodeIds = new Set(weightsReady ? weightNodes.map((node) => node.id) : []);
+  const treeStructureReady = model.criteria.length > 0 && leaves.length > 0;
+  const criteriaReady =
+    allCriteria.length > 0 &&
+    allCriteria.every((criterion) => !needsCriterionConfiguration(criterion, configuredCriterionIds));
+
+  if (!treeStructureReady) {
+    return {
+      activeStep: 1 as MavtStep,
+      step1Phase: "structure" as Step1Phase,
+      configuredCriterionIds,
+      alternativesReady,
+      matrixReady,
+      completedWeightNodeIds,
+    };
+  }
+
+  if (!criteriaReady) {
+    return {
+      activeStep: 1 as MavtStep,
+      step1Phase: "configure" as Step1Phase,
+      configuredCriterionIds,
+      alternativesReady,
+      matrixReady,
+      completedWeightNodeIds,
+    };
+  }
+
+  if (!matrixReady) {
+    return {
+      activeStep: 2 as MavtStep,
+      step1Phase: "configure" as Step1Phase,
+      configuredCriterionIds,
+      alternativesReady,
+      matrixReady,
+      completedWeightNodeIds,
+    };
+  }
+
+  if (!weightsReady) {
+    return {
+      activeStep: 3 as MavtStep,
+      step1Phase: "configure" as Step1Phase,
+      configuredCriterionIds,
+      alternativesReady,
+      matrixReady,
+      completedWeightNodeIds,
+    };
+  }
+
+  return {
+    activeStep: 4 as MavtStep,
+    step1Phase: "configure" as Step1Phase,
+    configuredCriterionIds,
+    alternativesReady,
+    matrixReady,
+    completedWeightNodeIds,
+  };
+}
+
+function hasDefinedWeightGroups(criteria: Criterion[]) {
+  const rawCriteria = criteria as Array<Criterion & { weight?: unknown }>;
+  const groups: Array<Array<Criterion & { weight?: unknown }>> = [rawCriteria];
+  const walk = (items: Array<Criterion & { weight?: unknown }>) => {
+    items.forEach((criterion) => {
+      const children = criterion.children as Array<Criterion & { weight?: unknown }> | undefined;
+      if (children && children.length > 0) {
+        groups.push(children);
+        walk(children);
+      }
+    });
+  };
+  walk(rawCriteria);
+
+  return groups.every((group) => {
+    if (group.length === 0) return false;
+    const weights = group.map((criterion) => Number(criterion.weight));
+    if (!weights.every((weight) => Number.isFinite(weight) && weight >= 0 && weight <= 100)) return false;
+    const sum = weights.reduce((total, weight) => total + weight, 0);
+    return Math.abs(sum - 100) <= 0.01;
   });
 }
 
@@ -1633,10 +2314,13 @@ function applyAssistantOperations(
         if (value === undefined) break;
         draft = {
           ...draft,
-          criteria: updateCriterion(draft.criteria, criterion.id, (item) => ({
-            ...item,
-            performances: { ...(item.performances ?? {}), [alternative.id]: value },
-          })),
+          criteria: updateCriterion(draft.criteria, criterion.id, (item) => {
+            const normalizedValue = normalizePerformanceForScale(item, value);
+            return {
+              ...item,
+              performances: { ...(item.performances ?? {}), [alternative.id]: normalizedValue },
+            };
+          }),
         };
         selectedId = criterion.id;
         break;
@@ -1682,7 +2366,9 @@ function interpretCommandLocal(
     understoodCount += 1;
   }
 
-  const clauses = splitAssistantClauses(rawText);
+  const clauses = /^curva\s+de\s+valor\s+de\s+.+?:/i.test(rawText.trim())
+    ? [rawText.trim()]
+    : splitAssistantClauses(rawText);
   const effectiveClauses = structured.model !== model
     ? clauses.filter((clause) => !isStructuredDescription(normalizeText(clause)))
     : clauses;
@@ -1733,6 +2419,24 @@ function interpretCommandLocal(
   };
 }
 
+function getAssistantStepGuardMessage(text: string, activeStep: MavtStep) {
+  const normalized = normalizeText(text);
+  const isWeightCommand = /\bpeso\b|\bpesos\b|\bponderacao\b/.test(normalized);
+  const isStructureAction = /\b(adicione|adicionar|inclua|incluir|crie|criar|remova|remover|apague|apagar|exclua|excluir|delete)\b/.test(normalized);
+  const isCriterionConfigCommand = /\b(subcriterio|subcriterios|escala|curva de valor|funcao de valor|metrica)\b/.test(normalized);
+  const isStep2Command = /\b(alternativa|alternativas|matriz|desempenho)\b/.test(normalized);
+
+  if (activeStep === 1 && (isWeightCommand || isStep2Command)) {
+    return "Na etapa 1, o agente aceita apenas comandos de construcao e configuracao dos criterios.";
+  }
+
+  if (activeStep === 3 && (isStructureAction || isCriterionConfigCommand || isStep2Command)) {
+    return "Na etapa 3, o agente aceita apenas comandos relacionados aos pesos.";
+  }
+
+  return "";
+}
+
 function buildBlockedCriterionRemovalMessage(criterion: Criterion, parent: Criterion | undefined, rootCriteria: Criterion[]) {
   if (parent) {
     const siblingNames = (parent.children ?? []).map((child) => child.name).join(" e ");
@@ -1751,8 +2455,8 @@ function isConfirmationMessage(rawText: string) {
 function inferPendingAssistantAction(rawText: string, model: DecisionModel): PendingAssistantAction | null {
   const text = normalizeText(rawText);
   const match =
-    text.match(/(?:remova|apague|exclua|delete)\s+(?:o\s+)?criterio\s+(.+)/) ??
-    text.match(/^(?:remova|apague|exclua|delete)\s+(.+)$/);
+    text.match(/(?:remova|remover|apague|apagar|exclua|excluir|delete)\s+(?:o\s+)?criterio\s+(.+)/) ??
+    text.match(/^(?:remova|remover|apague|apagar|exclua|excluir|delete)\s+(.+)$/);
   const target = match?.[1] ? removeTrailingCommand(match[1]) : "";
   if (!target) return null;
 
@@ -1826,8 +2530,36 @@ function applyAssistantClause(
   if (!clause || text.length < 3) return undefined;
   if (isStructuredDescription(text)) return undefined;
 
+  const addNamedChildMatch = clause.match(
+    /(?:adicione|adicionar|inclua|incluir|crie|criar)\s+(?:o\s+|a\s+|um\s+|uma\s+|os\s+|as\s+)?(?:(?:crit[eé]rio|subcrit[eé]rio)s?\s+)?(.+?)\s+(?:em|no|na|ao|a|para)\s+(?:o\s+|a\s+)?(?:(?:crit[eé]rio)\s+)?(.+)$/i,
+  );
+  if (addNamedChildMatch) {
+    const names = parseNameList(addNamedChildMatch[1]);
+    const target = addNamedChildMatch[2];
+    if (names.length === 0) return undefined;
+    if (isRootTarget(target, model.rootName)) {
+      const additions = names.map((name) => createCriterion(name, 20, model.alternatives));
+      return {
+        model: {
+          ...model,
+          criteria: additions.reduce((items, criterion) => addWeightedSibling(items, criterion, criterion.weight), model.criteria),
+        },
+        reply: `Criei ${additions.map((item) => item.name).join(", ")} como critério principal.`,
+        selectedId: additions[0]?.id,
+      };
+    }
+    const parent = findCriterionByName(model.criteria, target);
+    if (!parent) return { model, reply: "Não encontrei o critério que receberia esse subcritério." };
+    const next = addSubcriteriaToModel(model, parent.id, names);
+    return {
+      model: next,
+      reply: `Adicionei ${names.join(", ")} em ${parent.name}.`,
+      selectedId: parent.id,
+    };
+  }
+
   const namedSubcriterionMatch = text.match(
-    /(?:adicione|inclua|crie)\s+(?:um\s+|uma\s+|o\s+|a\s+)?subcriterio\s+(?:em|no|na|ao|a|para)\s+(?:criterio\s+)?(.+?)\s+chamad[oa]\s+(.+)/,
+    /(?:adicione|adicionar|inclua|incluir|crie|criar)\s+(?:um\s+|uma\s+|o\s+|a\s+)?subcriterio\s+(?:em|no|na|ao|a|para)\s+(?:criterio\s+)?(.+?)\s+chamad[oa]\s+(.+)/,
   );
   if (namedSubcriterionMatch) {
     const parent = findCriterionByName(model.criteria, namedSubcriterionMatch[1]);
@@ -1843,7 +2575,7 @@ function applyAssistantClause(
   }
 
   const addSubcriteriaMatch = clause.match(
-    /(?:adicione|inclua|crie)\s+(?:os?\s+)?subcrit[eé]rios?\s+(.+?)\s+(?:ao|a|no|na|em|para\s+o|para\s+a)\s+(?:crit[eé]rio\s+)?(.+)/i,
+    /(?:adicione|adicionar|inclua|incluir|crie|criar)\s+(?:os?\s+)?subcrit[eé]rios?\s+(.+?)\s+(?:ao|a|no|na|em|para\s+o|para\s+a)\s+(?:crit[eé]rio\s+)?(.+)/i,
   );
   if (addSubcriteriaMatch) {
     const names = parseNameList(addSubcriteriaMatch[1]);
@@ -1867,9 +2599,9 @@ function applyAssistantClause(
   }
 
   const removeAlternativeMatch = text.match(
-    /(?:remova|apague|exclua|delete)\s+(?:as?\s+)?alternativas?\s+(.+)/,
+    /(?:remova|remover|apague|apagar|exclua|excluir|delete)\s+(?:as?\s+)?alternativas?\s+(.+)/,
   );
-  const genericRemoveMatch = text.match(/^(?:remova|apague|exclua|delete)\s+(.+)$/);
+  const genericRemoveMatch = text.match(/^(?:remova|remover|apague|apagar|exclua|excluir|delete)\s+(.+)$/);
   if (removeAlternativeMatch || genericRemoveMatch) {
     const target = removeAlternativeMatch?.[1] ?? genericRemoveMatch?.[1] ?? "";
     const alternative = findAlternativeByName(model.alternatives, target);
@@ -1883,7 +2615,7 @@ function applyAssistantClause(
   }
 
   const addAlternativeMatch = text.match(
-    /(?:adicione|inclua|crie)\s+(?:as?\s+)?alternativas?\s+(.+)/,
+    /(?:adicione|adicionar|inclua|incluir|crie|criar)\s+(?:as?\s+)?alternativas?\s+(.+)/,
   );
   if (addAlternativeMatch) {
     const names = parseNameList(removeTrailingCommand(addAlternativeMatch[1]));
@@ -1899,7 +2631,7 @@ function applyAssistantClause(
     };
   }
 
-  const removeCriterionMatch = text.match(/(?:remova|apague|exclua|delete)\s+(?:o\s+)?criterio\s+(.+)/);
+  const removeCriterionMatch = text.match(/(?:remova|remover|apague|apagar|exclua|excluir|delete)\s+(?:o\s+)?criterio\s+(.+)/);
   const genericCriterionRemoveTarget = genericRemoveMatch ? removeTrailingCommand(genericRemoveMatch[1]) : "";
   if (removeCriterionMatch || genericCriterionRemoveTarget) {
     const criterion = findCriterionByName(
@@ -1921,7 +2653,7 @@ function applyAssistantClause(
     };
   }
 
-  const addCriterionMatch = text.match(/(?:adicione|inclua|crie)\s+(?:os?\s+)?criterios?\s+(.+)/);
+  const addCriterionMatch = text.match(/(?:adicione|adicionar|inclua|incluir|crie|criar)\s+(?:os?\s+)?criterios?\s+(.+)/);
   if (addCriterionMatch) {
     const source = removeTrailingCommand(addCriterionMatch[1]);
     const childrenMatch = source.match(/(.+?)\s+com\s+(?:os?\s+)?subcriterios?\s+(.+)/);
@@ -1945,6 +2677,56 @@ function applyAssistantClause(
     };
   }
 
+  const weightBatchMatch = text.match(
+    /peso\s+dos\s+criterios\s+(.+?)\s+(?:para|=|em)\s+(.+?)\s*%?$/,
+  );
+  if (weightBatchMatch) {
+    const names = parseNameList(weightBatchMatch[1]);
+    const weights = parseNumberList(weightBatchMatch[2]);
+    if (names.length === 0 || weights.length === 0) return undefined;
+    if (names.length !== weights.length) {
+      return { model, reply: "Informe a mesma quantidade de criterios e pesos. Ex: Peso dos criterios Custo, Qualidade para 40, 60%." };
+    }
+
+    const criteria = names.map((name) => findCriterionByName(model.criteria, name));
+    if (criteria.some((criterion) => !criterion)) {
+      return { model, reply: "Nao encontrei todos os criterios informados para ajustar os pesos." };
+    }
+
+    const foundCriteria = criteria as Criterion[];
+    const parentIds = foundCriteria.map((criterion) => findParent(model.criteria, criterion.id)?.id ?? ROOT_ID);
+    const parentId = parentIds[0];
+    if (!parentIds.every((id) => id === parentId)) {
+      return { model, reply: "Defina pesos em lote apenas para criterios irmaos, ou seja, dentro do mesmo criterio pai." };
+    }
+
+    const informedSiblingWeightSum = weights.reduce((sum, weight) => sum + weight, 0);
+    if (informedSiblingWeightSum > 100) {
+      return {
+        model,
+        reply: `Pesos invalidos: os criterios informados sao irmaos e seus pesos somam ${formatWeight(informedSiblingWeightSum)}%, acima de 100%.`,
+      };
+    }
+
+    const weightsById = new Map(foundCriteria.map((criterion, index) => [criterion.id, weights[index]]));
+    const next =
+      parentId === ROOT_ID
+        ? { ...model, criteria: setSiblingWeights(model.criteria, weightsById) }
+        : {
+            ...model,
+            criteria: updateCriterion(model.criteria, parentId, (parent) => ({
+              ...parent,
+              children: setSiblingWeights(parent.children ?? [], weightsById),
+            })),
+          };
+
+    return {
+      model: next,
+      reply: `Defini os pesos de ${foundCriteria.map((criterion, index) => `${criterion.name} (${formatWeight(weights[index])}%)`).join(", ")}.`,
+      selectedId: parentId,
+    };
+  }
+
   const weightMatch = text.match(
     /peso\s+(?:do|da|de|dos|das)?\s*(?:criterio\s+)?(.+?)\s+(?:para|=|em)\s+(\d+(?:[,.]\d+)?)\s*%?/,
   );
@@ -1952,6 +2734,7 @@ function applyAssistantClause(
     const criterion = findCriterionByName(model.criteria, weightMatch[1]);
     if (!criterion) return { model, reply: "Não encontrei esse critério para alterar o peso." };
     const weight = Number(weightMatch[2].replace(",", "."));
+    if (weight > 100) return { model, reply: `Peso invalido: ${formatWeight(weight)}% esta acima de 100%.` };
     const parent = findParent(model.criteria, criterion.id);
     const next = !parent
       ? { ...model, criteria: normalizeSiblings(model.criteria, criterion.id, weight) }
@@ -1970,7 +2753,7 @@ function applyAssistantClause(
   }
 
   const performanceMatch = clause.match(
-    /(?:defina|configure|ajuste|informe|coloque)\s+(?:o\s+|a\s+)?(.+?)\s+(?:do|da|de|para|em)\s+(.+?)\s+(?:como|=|para|em)\s+(.+)$/i,
+    /(?:defina|definir|configure|configurar|ajuste|ajustar|informe|informar|coloque|colocar)\s+(?:o\s+|a\s+)?(.+?)\s+(?:do|da|de|para|em)\s+(.+?)\s+(?:como|=|para|em)\s+(.+)$/i,
   );
   if (performanceMatch) {
     const criterion = findCriterionByName(model.criteria, performanceMatch[1]);
@@ -1984,18 +2767,57 @@ function applyAssistantClause(
     return {
       model: {
         ...model,
-        criteria: updateCriterion(model.criteria, criterion.id, (item) => ({
-          ...item,
-          performances: { ...(item.performances ?? {}), [alternative.id]: value },
-        })),
+        criteria: updateCriterion(model.criteria, criterion.id, (item) => {
+          const normalizedValue = normalizePerformanceForScale(item, value);
+          return {
+            ...item,
+            performances: { ...(item.performances ?? {}), [alternative.id]: normalizedValue },
+          };
+        }),
       },
       reply: `Defini ${criterion.name} de ${alternative.name} como ${rawValue}.`,
       selectedId: criterion.id,
     };
   }
 
+  const valueCurveMatch = clause.match(/curva\s+de\s+valor\s+de\s+(.+?)\s*:\s*(.+)$/i);
+  if (valueCurveMatch) {
+    const criterion = findCriterionByName(model.criteria, valueCurveMatch[1]);
+    if (!criterion) return { model, reply: "Nao encontrei esse criterio para configurar a curva de valor." };
+    if (!isLeaf(criterion)) {
+      return { model, reply: `${criterion.name} e um criterio composto. A curva de valor so pode ser definida em criterios folha.` };
+    }
+
+    const valuePoints = parseValueCurvePoints(valueCurveMatch[2]);
+    if (valuePoints.length < 2) {
+      return { model, reply: "Informe pelo menos dois pontos no formato valor - score. Ex: Curva de valor de Preco: 0 - 0, 10 - 100." };
+    }
+
+    const min = Math.min(...valuePoints.map((point) => point.value));
+    const max = Math.max(...valuePoints.map((point) => point.value));
+    return {
+      model: {
+        ...model,
+        criteria: updateCriterion(model.criteria, criterion.id, (item) => ({
+          ...item,
+          scale: {
+            min,
+            max,
+            direction: "benefit",
+            mode: "quantitative",
+            autoBounds: false,
+            manualCurve: true,
+            valuePoints,
+          },
+        })),
+      },
+      reply: `Configurei a curva de valor de ${criterion.name} com ${valuePoints.length} pontos.`,
+      selectedId: criterion.id,
+    };
+  }
+
   const scaleMatch = clause.match(
-    /(?:defina|configure|ajuste)\s+(?:a\s+|o\s+)?(?:(?:escala|curva|fun[çc][aã]o(?:\s+de\s+valor)?)\s+(?:do|da|de)\s+)?(?:crit[eé]rio\s+)?(.+?)\s+de\s+(\d+(?:[,.]\d+)?)\s+a\s+(\d+(?:[,.]\d+)?)(.*)$/i,
+    /(?:defina|definir|configure|configurar|ajuste|ajustar)\s+(?:a\s+|o\s+)?(?:(?:escala|curva|fun[çc][aã]o(?:\s+de\s+valor)?)\s+(?:do|da|de)\s+)?(?:crit[eé]rio\s+)?(.+?)\s+de\s+(\d+(?:[,.]\d+)?)\s+a\s+(\d+(?:[,.]\d+)?)(.*)$/i,
   );
   if (scaleMatch) {
     const criterion = findCriterionByName(model.criteria, scaleMatch[1]);
@@ -2103,7 +2925,13 @@ function addSubcriteriaToModel(model: DecisionModel, parentId: string, names: st
     ...model,
     criteria: updateCriterion(model.criteria, parentId, (criterion) => ({
       ...criterion,
-      children: normalizeSiblings([...(criterion.children ?? []), ...children]),
+      children: normalizeSiblings([
+        ...(criterion.children ?? []),
+        ...children,
+        ...((criterion.children?.length ?? 0) === 0 && children.length === 1
+          ? [createCriterion("Novo subcritério", 50, model.alternatives)]
+          : []),
+      ]),
       scale: undefined,
       performances: undefined,
     })),
@@ -2131,7 +2959,7 @@ function buildCriteriaFromAgentItems(
 function splitAssistantClauses(rawText: string) {
   return rawText
     .split(
-      /[\n.;]+|,\s*(?=(?:adicione|inclua|crie|remova|apague|exclua|delete|mude|altere|troque|peso|defina|configure|ajuste)\b)|\s+e\s+(?=(?:adicione|inclua|crie|remova|apague|exclua|delete|mude|altere|troque|peso|defina|configure|ajuste)\b)/i,
+      /[\n.;]+|,\s*(?=(?:adicione|adicionar|inclua|incluir|crie|criar|remova|remover|apague|apagar|exclua|excluir|delete|mude|mudar|altere|alterar|troque|trocar|peso|defina|definir|configure|configurar|ajuste|ajustar)\b)|\s+e\s+(?=(?:adicione|adicionar|inclua|incluir|crie|criar|remova|remover|apague|apagar|exclua|excluir|delete|mude|mudar|altere|alterar|troque|trocar|peso|defina|definir|configure|configurar|ajuste|ajustar)\b)/i,
     )
     .map((item) => item.trim())
     .filter(Boolean);
@@ -2153,7 +2981,7 @@ function createCriterion(name: string, weight: number, alternatives: Alternative
     name,
     weight,
     children: hasChildren ? children : undefined,
-    scale: hasChildren ? undefined : { min: 0, max: 10, direction: "benefit", mode: "quantitative" },
+    scale: undefined,
     performances: hasChildren ? undefined : Object.fromEntries(alternatives.map((alternative) => [alternative.id, ""])),
   };
 }
@@ -2204,6 +3032,33 @@ function parseNameList(value: string) {
     .filter(Boolean);
 }
 
+function parseNumberList(value: string) {
+  return value
+    .replace(/\s+(?:e|ou)\s+/gi, ",")
+    .split(/[,;]+/)
+    .map((item) => Number(item.replace("%", "").replace(",", ".").trim()))
+    .filter(Number.isFinite);
+}
+
+function parseValueCurvePoints(value: string): ValuePoint[] {
+  return value
+    .split(/[,;]+/)
+    .map((item) => {
+      const match = item.match(/(-?\d+(?:[,.]\d+)?)\s*(?:-|->|:)\s*(-?\d+(?:[,.]\d+)?)\s*%?/);
+      if (!match) return undefined;
+      const pointValue = Number(match[1].replace(",", "."));
+      const score = Number(match[2].replace(",", "."));
+      if (!Number.isFinite(pointValue) || !Number.isFinite(score)) return undefined;
+      return {
+        id: uid("point"),
+        value: pointValue,
+        score: clamp(score, 0, 100),
+      };
+    })
+    .filter((point): point is ValuePoint => Boolean(point))
+    .sort((a, b) => a.value - b.value);
+}
+
 function uniqueNames(values: string[]) {
   const seen = new Set<string>();
   return values
@@ -2217,15 +3072,16 @@ function uniqueNames(values: string[]) {
 }
 
 function cleanName(value: string) {
+  const compact = value.replace(/\[[^\]]*\]/g, "").replace(/[:.]+$/g, "").trim();
+  if (/^[\p{L}\p{N}]$/u.test(compact)) return compact.toUpperCase();
+
   return titleCase(
-    value
-      .replace(/\[[^\]]*\]/g, "")
+    compact
       .replace(
         /(^|\s)(?:o|a|os|as|um|uma|criterio|criterios|critério|critérios|alternativa|alternativas|subcriterio|subcriterios|subcritério|subcritérios)(?=\s|$)/gi,
         " ",
       )
       .replace(/\b(?:sao|são|serao|serão|sera|será|eh|e|é|com|peso|para|ao|no|na|do|da|de)\b$/gi, "")
-      .replace(/[:.]+$/g, "")
       .trim(),
   );
 }
@@ -2252,7 +3108,7 @@ function parsePerformanceValue(value: string) {
 
 function removeTrailingCommand(value: string) {
   return value.replace(
-    /\s+(?:e\s+)?(?:adicione|inclua|crie|remova|apague|exclua|delete|mude|altere|troque|peso|defina|configure|ajuste)\b[\s\S]*$/i,
+    /\s+(?:e\s+)?(?:adicione|adicionar|inclua|incluir|crie|criar|remova|remover|apague|apagar|exclua|excluir|delete|mude|mudar|altere|alterar|troque|trocar|peso|defina|definir|configure|configurar|ajuste|ajustar)\b[\s\S]*$/i,
     "",
   );
 }
@@ -2279,69 +3135,119 @@ function titleCase(value: string) {
 }
 
 function CriterionInspector({
+  activeStep,
+  step1Phase,
   selectedId,
   criterion,
   children,
   alternatives,
   canDelete,
   notice,
+  criterionConfigured,
+  currentWeightNodeId,
+  weightResetMode,
   rootName,
   onChange,
   onRootNameChange,
   onSiblingWeightChange,
   onDelete,
-  onAddChild,
+  onAddChildren,
   onConvertToLeaf,
+  onMarkCriterionConfigured,
+  onMarkWeightsReady,
   onPerformanceChange,
 }: {
+  activeStep: MavtStep;
+  step1Phase: Step1Phase;
   selectedId: string;
   criterion?: Criterion;
   children: Criterion[];
   alternatives: Alternative[];
   canDelete: boolean;
   notice: string;
+  criterionConfigured: boolean;
+  currentWeightNodeId?: string;
+  weightResetMode: boolean;
   rootName: string;
   onChange: (updater: (criterion: Criterion) => Criterion) => void;
   onRootNameChange: (rootName: string) => void;
   onSiblingWeightChange: (childId: string, weight: number) => void;
   onDelete: () => void;
-  onAddChild: () => void;
+  onAddChildren: (names: string[]) => void;
   onConvertToLeaf: () => void;
+  onMarkCriterionConfigured: () => void;
+  onMarkWeightsReady: () => void;
   onPerformanceChange: (alternativeId: string, value: number | string) => void;
 }) {
+  const [childDraft, setChildDraft] = useState("");
   const isRoot = selectedId === ROOT_ID;
   const leaf = criterion ? isLeaf(criterion) : false;
-  const scale = criterion?.scale ?? { min: 0, max: 10, direction: "benefit" as Direction };
+  const showStructureEditor = activeStep === 1 && step1Phase === "structure";
+  const showLeafConfiguration = activeStep === 1 && step1Phase === "configure";
+  const showWeightEditor = activeStep === 3 && (weightResetMode ? children.length > 0 : selectedId === currentWeightNodeId);
+  const scale = criterion?.scale ?? { min: 0, max: 10, direction: "benefit" as Direction, autoBounds: false };
   const scaleMode = scale.mode ?? "quantitative";
   const quantitativeBounds = criterion ? getQuantitativeBounds(criterion) : { min: scale.min, max: scale.max };
-  const displayedMin = scale.autoBounds !== false ? quantitativeBounds.min : scale.min;
-  const displayedMax = scale.autoBounds !== false ? quantitativeBounds.max : scale.max;
+  const displayedMin = scale.autoBounds === true ? quantitativeBounds.min : scale.min;
+  const displayedMax = scale.autoBounds === true ? quantitativeBounds.max : scale.max;
   const valuePoints = scale.valuePoints ?? [];
   const qualitativeOptions = scale.qualitativeOptions ?? [
     { id: "qual-ruim", label: "Ruim", score: 0 },
     { id: "qual-medio", label: "Medio", score: 50 },
     { id: "qual-bom", label: "Bom", score: 100 },
   ];
+  const submitChildDraft = () => {
+    const names = parseNameList(childDraft);
+    if (names.length === 0) return;
+    onAddChildren(names);
+    setChildDraft("");
+  };
 
   return (
     <div className="inspector-content">
       {notice && <div className="notice">{notice}</div>}
 
-      {isRoot && (
+      {showStructureEditor && isRoot && (
         <label className="field">
           Nome
           <input value={rootName} onChange={(event) => onRootNameChange(event.target.value)} />
         </label>
       )}
 
-      {!isRoot && criterion && (
+      {showStructureEditor && !isRoot && criterion && (
         <label className="field">
           Nome
           <input value={criterion.name} onChange={(event) => onChange((item) => ({ ...item, name: event.target.value }))} />
         </label>
       )}
 
-      {!leaf && (
+      {showStructureEditor && (
+        <div className="child-builder">
+          <div>
+            <div className="section-title">{isRoot ? "Critérios principais" : "Subcritérios"}</div>
+            <p className="helper-text">Digite um ou mais nomes separados por vírgula.</p>
+          </div>
+          <div className="child-builder-row">
+            <input
+              value={childDraft}
+              onChange={(event) => setChildDraft(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  submitChildDraft();
+                }
+              }}
+              placeholder={isRoot ? "Ex: Custo, Qualidade" : "Ex: Preço, Manutenção"}
+            />
+            <button onClick={submitChildDraft}>
+              <Plus size={16} />
+              Adicionar
+            </button>
+          </div>
+        </div>
+      )}
+
+      {showWeightEditor && !leaf && (
         <div className="weight-editor">
           <div className="section-title">Pesos dos filhos</div>
           <p className="helper-text">Ajuste um peso e os irmãos serão redistribuídos automaticamente.</p>
@@ -2364,26 +3270,25 @@ function CriterionInspector({
             </div>
           ))}
 
-          <div className="button-row">
-            <button onClick={onAddChild}>
-              <Plus size={16} />
-              Subcritério
-            </button>
-            {!isRoot && (
-              <button className="structure-action" onClick={onConvertToLeaf}>
-                <ListMinus size={16} />
-                Remover subcritérios
+          {!weightResetMode && (
+            <div className="button-row">
+              <button className="primary" onClick={onMarkWeightsReady}>
+                Pronto
               </button>
-            )}
-          </div>
+            </div>
+          )}
         </div>
       )}
 
-      {leaf && criterion && (
+      {showLeafConfiguration && leaf && criterion && (
         <div className="leaf-editor">
-          <div className="readonly-weight">
-            Peso local: <strong>{formatWeight(criterion.weight)}%</strong>
+          <div className={`readonly-weight ${criterionConfigured ? "ready" : ""}`}>
+            Configuração: <strong>{criterionConfigured ? "pronta" : "pendente"}</strong>
           </div>
+          <label className="field">
+            Nome
+            <input value={criterion.name} onChange={(event) => onChange((item) => ({ ...item, name: event.target.value }))} />
+          </label>
           <div className="section-title">Função de valor</div>
           <label className="field">
             Tipo de métrica
@@ -2418,7 +3323,7 @@ function CriterionInspector({
               <label className="check-field">
                 <input
                   type="checkbox"
-                  checked={scale.autoBounds !== false}
+                  checked={scale.autoBounds === true}
                   onChange={(event) =>
                     onChange((item) => ({
                       ...item,
@@ -2434,7 +3339,7 @@ function CriterionInspector({
                   <input
                     type="number"
                     value={displayedMin}
-                    disabled={scale.autoBounds !== false}
+                    disabled={scale.autoBounds === true}
                     onChange={(event) =>
                       onChange((item) => ({
                         ...item,
@@ -2448,7 +3353,7 @@ function CriterionInspector({
                   <input
                     type="number"
                     value={displayedMax}
-                    disabled={scale.autoBounds !== false}
+                    disabled={scale.autoBounds === true}
                     onChange={(event) =>
                       onChange((item) => ({
                         ...item,
@@ -2669,42 +3574,18 @@ function CriterionInspector({
             </div>
           )}
 
-          <div className="section-title">Valores das alternativas</div>
-          <div className="performance-list">
-            {alternatives.map((alternative) => (
-              <label className="field inline" key={alternative.id}>
-                <span>{alternative.name}</span>
-                {scaleMode === "qualitative" ? (
-                  <select
-                    value={String(criterion.performances?.[alternative.id] ?? "")}
-                    onChange={(event) => onPerformanceChange(alternative.id, event.target.value)}
-                  >
-                    <option value="">Selecionar</option>
-                    {qualitativeOptions.map((option) => (
-                      <option key={option.id} value={option.id}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                ) : (
-                  <input
-                    type="number"
-                    value={criterion.performances?.[alternative.id] ?? ""}
-                    onChange={(event) => onPerformanceChange(alternative.id, Number(event.target.value))}
-                  />
-                )}
-              </label>
-            ))}
-          </div>
+          <button className="primary wide-button" onClick={onMarkCriterionConfigured}>
+            Pronto
+          </button>
         </div>
       )}
 
-      {!isRoot && (
+      {showStructureEditor && !isRoot && (
         <div className="inspector-actions">
-          {leaf && (
-            <button onClick={onAddChild}>
-              <Plus size={16} />
-              Adicionar subcritérios
+          {!leaf && (
+            <button className="structure-action" onClick={onConvertToLeaf}>
+              <ListMinus size={16} />
+              Remover subcritérios
             </button>
           )}
           <button className="danger" onClick={onDelete} disabled={!canDelete}>
@@ -2902,12 +3783,14 @@ function AlternativesModal({
   alternatives,
   onClose,
   onAdd,
+  onReady,
   onRemove,
   onRename,
 }: {
   alternatives: Alternative[];
   onClose: () => void;
   onAdd: () => void;
+  onReady: () => void;
   onRemove: (id: string) => void;
   onRename: (id: string, name: string) => void;
 }) {
@@ -2927,6 +3810,9 @@ function AlternativesModal({
         <Plus size={16} />
         Nova alternativa
       </button>
+      <button className="primary wide-button modal-ready-button" onClick={onReady}>
+        Pronto
+      </button>
     </Modal>
   );
 }
@@ -2935,11 +3821,13 @@ function MatrixModal({
   alternatives,
   leaves,
   onClose,
+  onReady,
   onPerformanceChange,
 }: {
   alternatives: Alternative[];
   leaves: Array<{ criterion: Criterion; weight: number }>;
   onClose: () => void;
+  onReady: () => void;
   onPerformanceChange: (criterionId: string, alternativeId: string, value: number | string) => void;
 }) {
   return (
@@ -2976,7 +3864,13 @@ function MatrixModal({
                       <input
                         type="number"
                         value={leaf.criterion.performances?.[alternative.id] ?? ""}
-                        onChange={(event) => onPerformanceChange(leaf.criterion.id, alternative.id, Number(event.target.value))}
+                        onChange={(event) =>
+                          onPerformanceChange(
+                            leaf.criterion.id,
+                            alternative.id,
+                            event.target.value === "" ? "" : Number(event.target.value),
+                          )
+                        }
                       />
                     )}
                   </td>
@@ -2986,6 +3880,9 @@ function MatrixModal({
           </tbody>
         </table>
       </div>
+      <button className="primary wide-button modal-ready-button" onClick={onReady}>
+        Pronto
+      </button>
     </Modal>
   );
 }
@@ -3031,14 +3928,13 @@ function renderHelpTopic(topic: HelpTopic) {
       <>
         <h3>Passo a passo MAVT</h3>
         <ol>
-          <li>Defina o problema central no título da árvore.</li>
-          <li>Liste as alternativas que serão comparadas.</li>
-          <li>Crie critérios e subcritérios, mantendo pelo menos 2 filhos em cada critério composto.</li>
-          <li>Ajuste os pesos locais; os irmãos são redistribuídos para somar 100%.</li>
-          <li>Configure a função de valor de cada critério folha.</li>
-          <li>Preencha a matriz de desempenho para todas as alternativas.</li>
-          <li>Abra Resultados para comparar pontuação, contribuição e sensibilidade.</li>
+          <li>Etapa 1A: construa a árvore, criando critérios e subcritérios nos nós.</li>
+          <li>Etapa 1B: configure os critérios. Edite nomes dos critérios compostos direto no nó; nas folhas, abra a janela para editar nome, métrica, curva de valor e marcar Pronto.</li>
+          <li>Etapa 2: defina manualmente as alternativas e complete a matriz de desempenho.</li>
+          <li>Etapa 3: defina os pesos em ordem, começando pela raiz e seguindo pelos critérios compostos destacados.</li>
+          <li>Etapa 4: abra Resultados para comparar ranking, contribuição e sensibilidade.</li>
         </ol>
+        <p>Você pode voltar para etapas anteriores a qualquer momento. O avanço segue a ordem 1, 2, 3 e 4.</p>
       </>
     );
   }
@@ -3047,17 +3943,18 @@ function renderHelpTopic(topic: HelpTopic) {
     return (
       <>
         <h3>Agente MAVT</h3>
+        <p>O chat fica disponivel apenas nas etapas 1 e 3, com prompts especificos para cada uma delas.</p>
         <p>
-          O chat pode editar a decisão por linguagem natural. Quando a IA externa falha, o app tenta aplicar comandos
-          comuns com o agente local.
+          O chat ajuda principalmente na estrutura dos critérios e nos pesos. Quando a IA externa falha, o app tenta
+          aplicar comandos comuns com o agente local.
         </p>
         <ul>
-          <li>remova a alternativa Corolla</li>
-          <li>adicione critério risco com peso 20%</li>
-          <li>adicione um subcritério em Qualidade chamado Design</li>
+          <li>adicione critério Risco</li>
+          <li>adicione Prazo em Qualidade</li>
+          <li>adicione subcritério Design em Qualidade</li>
+          <li>peso do critério Qualidade para 40%</li>
           <li>configure preço de 0 a 200 menor é melhor</li>
           <li>configure conforto de 0 a 10 maior é melhor</li>
-          <li>as alternativas são Alfa, Beta e Gama; os critérios são custo, qualidade e prazo</li>
         </ul>
         <p>
           Se uma remoção deixaria um critério com apenas um filho, o agente pergunta antes de remover todos os
@@ -3102,14 +3999,14 @@ function renderHelpTopic(topic: HelpTopic) {
     <>
       <h3>Como usar o software</h3>
       <p>
-        Comece editando o nome do problema na parte superior da árvore. Clique nos nós para editar nomes, pesos,
-        subcritérios, escalas de valor e valores das alternativas.
+        Comece pela Etapa 1A, editando o nome do problema e clicando nos nós da árvore para criar critérios e
+        subcritérios. Depois use 1B para configurar os critérios: nomes de critérios compostos direto no nó e edição completa das folhas na janela.
       </p>
       <p>
-        Use Alternativa para gerenciar opções, Matriz para preencher desempenhos e Resultados para abrir a análise MAVT.
-        O menu Arquivos importa estudos ou exporta JSON completo e CSV consolidado.
+        Na Etapa 2, use Alternativa e Matriz. Na Etapa 3, clique nos nós destacados para definir pesos. Na Etapa 4,
+        use Resultados para abrir a análise MAVT.
       </p>
-      <p>Se preferir, descreva a decisão no Agente MAVT e deixe o chat montar ou ajustar a estrutura.</p>
+      <p>O menu Arquivos importa estudos ou exporta JSON completo e CSV consolidado.</p>
     </>
   );
 }

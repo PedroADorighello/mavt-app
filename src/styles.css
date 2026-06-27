@@ -96,7 +96,7 @@ textarea {
   border-bottom: 1px solid #dbe6e8;
   display: grid;
   gap: 18px;
-  grid-template-columns: minmax(260px, 1fr) auto auto;
+  grid-template-columns: minmax(230px, 0.8fr) minmax(360px, 1.2fr) auto auto;
   min-height: 82px;
   padding: 14px 18px;
 }
@@ -199,7 +199,49 @@ p {
 }
 
 .tree-title-heading {
+  gap: 14px;
   padding: 8px 14px;
+}
+
+.stage-helper {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.stage-helper p {
+  color: #60737f;
+  font-size: 13px;
+}
+
+.stage-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.stage-phase-track {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.stage-phase-track button {
+  background: #f7fbfa;
+  border-color: #dbe8e6;
+  color: #35515b;
+  font-size: 12px;
+  min-height: 30px;
+  padding: 0 10px;
+}
+
+.stage-phase-track button.selected {
+  background: #2f6975;
+  border-color: #2f6975;
+  color: #fff;
 }
 
 .panel-heading.flush {
@@ -219,6 +261,116 @@ p {
 
 .toolbar button {
   min-width: 0;
+}
+
+.stepper {
+  display: grid;
+  gap: 5px;
+  grid-template-columns: repeat(4, minmax(72px, 1fr));
+}
+
+.stepper button {
+  align-items: center;
+  background: #f7fbfa;
+  border-color: #dbe8e6;
+  display: flex;
+  gap: 7px;
+  justify-content: start;
+  min-height: 34px;
+  padding: 4px 8px;
+  text-align: left;
+}
+
+.stepper button span {
+  align-items: center;
+  background: #e6f0ed;
+  border-radius: 999px;
+  color: #315765;
+  display: grid;
+  font-size: 11px;
+  font-weight: 800;
+  height: 20px;
+  place-items: center;
+  width: 20px;
+}
+
+.stepper button strong {
+  font-size: 12px;
+  line-height: 1.1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stepper button.active {
+  background: #eaf6f3;
+  border-color: #7fbfb4;
+  box-shadow: 0 0 0 3px rgba(47, 105, 117, 0.12);
+}
+
+.stepper button.locked {
+  opacity: 0.5;
+}
+
+.action-glow {
+  animation: softPulse 1.7s ease-in-out infinite;
+  border-color: #e3b84f;
+  box-shadow: 0 0 0 4px rgba(227, 184, 79, 0.18);
+}
+
+.results-emphasis {
+  animation: readyPulse 1.35s ease-in-out infinite;
+  background: #24734e;
+  border-color: #46a56f;
+  box-shadow:
+    0 0 0 5px rgba(70, 165, 111, 0.26),
+    0 12px 28px rgba(36, 115, 78, 0.26);
+  min-height: 42px;
+  padding-inline: 18px;
+}
+
+.results-emphasis svg {
+  height: 18px;
+  width: 18px;
+}
+
+.step2-action-emphasis {
+  animation: softPulse 1.45s ease-in-out infinite;
+  background: #fff7e6;
+  border-color: #e3a72f;
+  box-shadow:
+    0 0 0 5px rgba(227, 167, 47, 0.22),
+    0 10px 22px rgba(151, 96, 15, 0.14);
+  color: #5b3b08;
+  font-weight: 800;
+  min-height: 40px;
+  padding-inline: 16px;
+}
+
+.step2-action-emphasis svg {
+  color: #b27112;
+}
+
+.step2-action-ready {
+  background: #e8f6ee;
+  border-color: #46a56f;
+  box-shadow: 0 0 0 4px rgba(70, 165, 111, 0.16);
+  color: #1f6543;
+  font-weight: 800;
+  min-height: 40px;
+  padding-inline: 16px;
+}
+
+.step2-action-ready svg {
+  color: #2f8d58;
+}
+
+.next-step-ready {
+  animation: readyPulse 1.45s ease-in-out infinite;
+  border-color: #46a56f;
+  box-shadow:
+    0 0 0 4px rgba(70, 165, 111, 0.22),
+    0 12px 26px rgba(47, 105, 117, 0.22);
 }
 
 .file-menu {
@@ -502,6 +654,7 @@ p {
   color: #111827;
   min-width: 118px;
   padding: 5px 8px;
+  position: relative;
   text-align: center;
   transition:
     background 140ms ease,
@@ -534,12 +687,60 @@ p {
   color: #183c2b;
 }
 
+.criterion-node.clickable-hint {
+  border-color: #d89a2b;
+  box-shadow: 0 0 0 5px rgba(216, 154, 43, 0.16);
+}
+
+.criterion-node.root.clickable-hint {
+  border-color: #f0b429;
+  box-shadow:
+    0 0 0 5px rgba(240, 180, 41, 0.22),
+    0 8px 18px rgba(36, 88, 106, 0.22);
+}
+
+.criterion-node.weight-ready {
+  border-color: #4a9a67;
+}
+
+.node-status-dot {
+  animation: statusPulse 1.25s ease-in-out infinite;
+  background: #f0b429;
+  border: 2px solid #fff8dc;
+  border-radius: 999px;
+  box-shadow: 0 0 0 0 rgba(240, 180, 41, 0.48);
+  height: 12px;
+  position: absolute;
+  right: -7px;
+  top: -7px;
+  width: 12px;
+}
+
 .criterion-node strong {
   display: block;
   font-size: 14px;
   font-weight: 800;
   line-height: 1.15;
   overflow-wrap: anywhere;
+}
+
+.node-name.editable {
+  cursor: text;
+  text-decoration: underline;
+  text-decoration-color: rgba(31, 65, 83, 0.32);
+  text-decoration-style: dotted;
+  text-underline-offset: 3px;
+}
+
+.node-name-input {
+  background: rgba(255, 255, 255, 0.92);
+  border-color: #9fb8c2;
+  font-size: 13px;
+  font-weight: 800;
+  min-height: 28px;
+  padding: 3px 6px;
+  text-align: center;
+  width: 130px;
 }
 
 .node-meta {
@@ -706,6 +907,27 @@ p {
   padding: 10px 12px;
 }
 
+.readonly-weight.ready {
+  background: #e7f6ec;
+  border-color: #a8d9b7;
+  color: #24633a;
+}
+
+.child-builder {
+  background: #f8faf9;
+  border: 1px solid #e0e8ea;
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+  padding: 10px;
+}
+
+.child-builder-row {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
 .notice {
   background: #fff6df;
   border: 1px solid #ecd38d;
@@ -797,6 +1019,49 @@ p {
 
 .wide-button {
   width: 100%;
+}
+
+.modal-ready-button {
+  margin-top: 12px;
+}
+
+@keyframes statusPulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(240, 180, 41, 0.48);
+    transform: scale(0.92);
+  }
+  70% {
+    box-shadow: 0 0 0 8px rgba(240, 180, 41, 0);
+    transform: scale(1);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(240, 180, 41, 0);
+    transform: scale(0.92);
+  }
+}
+
+@keyframes softPulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 3px rgba(227, 184, 79, 0.12);
+  }
+  50% {
+    box-shadow: 0 0 0 6px rgba(227, 184, 79, 0.26);
+  }
+}
+
+@keyframes readyPulse {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 3px rgba(70, 165, 111, 0.16),
+      0 12px 26px rgba(47, 105, 117, 0.18);
+  }
+  50% {
+    box-shadow:
+      0 0 0 7px rgba(70, 165, 111, 0.3),
+      0 16px 32px rgba(47, 105, 117, 0.24);
+  }
 }
 
 .matrix-wrap {
@@ -894,6 +1159,10 @@ p {
 }
 
 @media (max-width: 1120px) {
+  .topbar {
+    grid-template-columns: 1fr;
+  }
+
   .workspace,
   .workspace.with-chat,
   .results-window {
@@ -913,6 +1182,19 @@ p {
 @media (max-width: 780px) {
   .topbar {
     grid-template-columns: 1fr;
+  }
+
+  .stepper {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .stepper button {
+    justify-content: center;
+    padding-inline: 6px;
+  }
+
+  .stepper button strong {
+    font-size: 11px;
   }
 
   .toolbar {
