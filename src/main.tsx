@@ -815,8 +815,10 @@ function App() {
     flattenCriteria(model.criteria).length > 0 &&
     flattenCriteria(model.criteria).every((criterion) => !needsCriterionConfiguration(criterion, configuredCriterionIds));
   const step1Ready = step1Phase === "configure" && treeStructureReady && criteriaConfigurationsReady;
+  const alternativesComplete =
+    model.alternatives.length > 0 && model.alternatives.every((alternative) => alternative.name.trim().length > 0);
   const matrixComplete = isPerformanceMatrixComplete(model.alternatives, leaves);
-  const step2Ready = alternativesReady && matrixReady && matrixComplete;
+  const step2Ready = alternativesReady && alternativesComplete && matrixReady && matrixComplete;
   const step3Ready = weightNodes.length > 0 && !weightResetMode && !currentWeightNode;
   const currentStepReady =
     activeStep === 1 ? step1Ready : activeStep === 2 ? step2Ready : activeStep === 3 ? step3Ready : true;
@@ -824,9 +826,13 @@ function App() {
   const visibleChatOpen = assistantAvailable && chatOpen;
   const currentAssistantShortcuts = assistantShortcutsByStep[activeStep] ?? [];
   const alternativeButtonClass =
-    activeStep === 2 ? (alternativesReady ? "step2-action-ready" : "step2-action-emphasis") : "";
+    activeStep === 2 ? (alternativesReady && alternativesComplete ? "step2-action-ready" : "step2-action-emphasis") : "";
   const matrixButtonClass =
-    activeStep === 2 && alternativesReady ? (matrixReady && matrixComplete ? "step2-action-ready" : "step2-action-emphasis") : "";
+    activeStep === 2 && alternativesReady && alternativesComplete
+      ? matrixReady && matrixComplete
+        ? "step2-action-ready"
+        : "step2-action-emphasis"
+      : "";
 
   useEffect(() => {
     if (!fileMenuOpen && !helpMenuOpen) return;
@@ -1067,6 +1073,7 @@ function App() {
   };
 
   const removeAlternative = (id: string) => {
+    const remainingAlternatives = model.alternatives.filter((alternative) => alternative.id !== id);
     commit((current) => ({
       ...current,
       alternatives: current.alternatives.filter((alternative) => alternative.id !== id),
@@ -1076,6 +1083,7 @@ function App() {
         return { ...criterion, performances };
       }),
     }));
+    if (remainingAlternatives.length === 0) setAlternativesReady(false);
     setMatrixReady(false);
   };
 
@@ -1467,7 +1475,7 @@ function App() {
             <button
               className={matrixButtonClass}
               onClick={() => setActiveModal("matrix")}
-              disabled={activeStep !== 2 || !alternativesReady}
+              disabled={activeStep !== 2 || !alternativesReady || !alternativesComplete}
             >
               <Table2 size={16} />
               Matriz
@@ -1854,14 +1862,18 @@ function App() {
             onAdd={addAlternative}
             onReady={markAlternativesReady}
             onRemove={removeAlternative}
-            onRename={(id, name) =>
+            onRename={(id, name) => {
               commit((current) => ({
                 ...current,
                 alternatives: current.alternatives.map((alternative) =>
                   alternative.id === id ? { ...alternative, name } : alternative,
                 ),
-              }))
-            }
+              }));
+              if (!name.trim()) {
+                setAlternativesReady(false);
+                setMatrixReady(false);
+              }
+            }}
           />
         )}
 
